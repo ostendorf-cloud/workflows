@@ -1,0 +1,4 @@
+.DS_Store
+.claude/worktrees/
+.claude/.cc-writes/
+.claude/settings.local.json

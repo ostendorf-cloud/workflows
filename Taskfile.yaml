@@ -1,0 +1,54 @@
+version: "3"
+
+tasks:
+  setup:
+    desc: Install the pinned toolchain
+    cmds:
+      - mise trust
+      - mise install
+
+  lint:actions:
+    desc: GitHub Actions workflow lint
+    cmds:
+      - actionlint
+
+  lint:yaml:
+    desc: YAML lint
+    cmds:
+      - yamllint .
+
+  lint:markdown:
+    desc: Markdown lint
+    cmds:
+      - markdownlint-cli2 "**/*.md"
+
+  lint:secrets:
+    desc: Secret scan over the git history
+    cmds:
+      - gitleaks git --no-banner --redact
+
+  lint:shell:
+    desc: Shell script lint for this repository's own CI scripts
+    cmds:
+      - shellcheck scripts/*.sh
+
+  lint:license:
+    desc: License header check for every shell script
+    cmds:
+      - addlicense -check -c "Simon Ostendorf" -y 2026 -l apache -s=only scripts/*.sh
+
+  test:shell:
+    desc: Shell script tests for this repository's own CI scripts
+    cmds:
+      - scripts/check-dco_test.sh
+
+  check:
+    desc: Every check, one after another
+    cmds:
+      - task: lint:actions
+      - task: lint:yaml
+      - task: lint:markdown
+      - task: lint:shell
+      - task: lint:license
+      - task: lint:secrets
+      - task: test:shell
