@@ -1,0 +1,24 @@
+name: dco
+
+# This repository's own enforcement of the Developer Certificate of
+# Origin, delegating to reusable-dco.yaml, the same reusable workflow
+# this repository publishes for other repositories to call, instead of
+# duplicating its logic. "secrets: inherit" forwards whatever this
+# repository's own context has, which today is nothing for
+# GH_APP_SECURITY_PRIVATE_KEY: the check still enforces through its own
+# pass/fail status, the same degraded shape a fork's pull request gets.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  signoff:
+    uses: ./.github/workflows/reusable-dco.yaml
+    secrets: inherit

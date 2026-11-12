@@ -27,10 +27,28 @@ tasks:
     cmds:
       - gitleaks git --no-banner --redact
 
+  lint:shell:
+    desc: Shell script lint for this repository's own CI scripts
+    cmds:
+      - shellcheck scripts/*.sh
+
+  lint:license:
+    desc: License header check for every shell script
+    cmds:
+      - addlicense -check -c "Simon Ostendorf" -y 2026 -l apache -s=only scripts/*.sh
+
+  test:shell:
+    desc: Shell script tests for this repository's own CI scripts
+    cmds:
+      - scripts/check-dco_test.sh
+
   check:
     desc: Every check, one after another
     cmds:
       - task: lint:actions
       - task: lint:yaml
       - task: lint:markdown
+      - task: lint:shell
+      - task: lint:license
       - task: lint:secrets
+      - task: test:shell
