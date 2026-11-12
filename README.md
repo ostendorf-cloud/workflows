@@ -14,7 +14,7 @@ A consuming repository's own workflow calls one with `uses:`, pinned to a releas
 ```yaml
 jobs:
   dco:
-    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v1.0.0
+    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v0.1.1
     secrets: inherit
 ```
 
