@@ -1,0 +1,61 @@
+name: renovate
+
+# Runs self-hosted Renovate for the organisation, authenticated through the
+# ostendorf-cloud-dependencies GitHub App, on a daily schedule plus manual
+# dispatch.
+#
+# Not a "workflow_call" workflow like the rest of this repository: Renovate
+# runs against whichever repositories the GitHub App is installed on, it is
+# not invoked by another repository's job.
+#
+# "runs-on-runner" is a "workflow_dispatch" input, not a bare
+# "runs-on: ubuntu-latest", so a manual run can target a different runner.
+# The "schedule" trigger carries no "workflow_dispatch" inputs context at
+# all ("inputs" is only ever populated by that event), so the job below
+# reads "runs-on: ${{ inputs.runs-on-runner || 'ubuntu-latest' }}" with the
+# "|| 'ubuntu-latest'" fallback, not just "${{ inputs.runs-on-runner }}", or
+# a scheduled run would error on a null input.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      runs-on-runner:
+        description: Runner label the Renovate run executes on.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+# One Renovate run at a time: a manual dispatch firing while the scheduled
+# run is still going must not overlap it.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ${{ inputs.runs-on-runner || 'ubuntu-latest' }}
+    # Renovate runs can take a while longer than this repository's usual
+    # lint checks, which finish in well under 10 minutes.
+    timeout-minutes: 30
+    steps:
+      - name: Mint a dependencies app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        with:
+          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
+          private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
+
+      # No config file exists yet in this repository for Renovate to read,
+      # so this checkout does nothing on its own today. It stays here
+      # because the upstream action's own documented usage always checks
+      # out first, and it becomes load-bearing the moment a Renovate config
+      # file is added to this repository.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@266fef21329c44765ad42f9dea1f01f5d2d91084  # v46.3.13
+        with:
+          token: ${{ steps.app-token.outputs.token }}
