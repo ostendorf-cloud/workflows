@@ -1,0 +1,117 @@
+name: reusable-license
+
+# Checks that every source file a caller cares about carries a license
+# header, using addlicense in "-check" mode: it only reports a missing
+# header, it never adds or rewrites one.
+#
+# Generalises the "lint:license" target that release-me and web-kit each
+# run from their own Taskfile.yaml, with the same tool and the same flags,
+# but different files to check. Rather than inventing a glob mini-language
+# that still could not express an arbitrary "find" expression (different
+# directories, name and type predicates, exclusions), a caller supplies one
+# or more complete "find" invocations and this workflow runs each of them
+# and checks the union of their output.
+#
+# Inputs:
+#   runs-on-runner: the runner label the job runs on, default
+#     ubuntu-latest. A typed input rather than a hardcoded "ubuntu-latest",
+#     because different consuming repositories may want a different
+#     runner (self-hosted, a different OS, a different size), and
+#     hardcoding one would force every consumer onto the same choice
+#     forever.
+#
+#   license-type: the license identifier passed to addlicense's "-l" flag,
+#     default "apache". A typed input because a future caller outside this
+#     organisation's own Apache-2.0 convention could need a different
+#     license.
+#
+#   copyright-holder: the name passed to addlicense's "-c" flag. Required,
+#     with no default: it varies per caller and a hardcoded default would
+#     silently stamp the wrong name on a repository that forgot to set it.
+#
+#   year: the year passed to addlicense's "-y" flag. Required, with no
+#     default: it changes over time, and a stale default would go
+#     unnoticed by a caller that forgot to set it.
+#
+#   find-commands: one or more complete shell "find" invocations, one per
+#     line. Each line's stdout is a newline-separated list of files; every
+#     file from every line is checked together. Required: there is no
+#     sensible default file set for an arbitrary repository.
+#
+#   addlicense-version: the version of addlicense mise installs, default
+#     "1.2.0". Pinned here, inside this reusable workflow, through an
+#     inline mise.toml passed to jdx/mise-action's "mise_toml" input, so
+#     the check runs on a known version regardless of whether the calling
+#     repository's own mise.toml pins addlicense at all.
+on:
+  workflow_call:
+    inputs:
+      runs-on-runner:
+        description: Runner label the license check runs on.
+        type: string
+        default: ubuntu-latest
+      license-type:
+        description: License identifier passed to addlicense's "-l" flag.
+        type: string
+        default: apache
+      copyright-holder:
+        description: Copyright holder name passed to addlicense's "-c" flag.
+        type: string
+        required: true
+      year:
+        description: Year passed to addlicense's "-y" flag.
+        type: string
+        required: true
+      find-commands:
+        description: >-
+          One or more complete shell "find" invocations, one per line. Every file every
+          invocation finds is checked together.
+        type: string
+        required: true
+      addlicense-version:
+        description: Version of addlicense mise installs.
+        type: string
+        default: "1.2.0"
+
+permissions:
+  contents: read
+
+jobs:
+  license:
+    name: License headers
+    runs-on: ${{ inputs.runs-on-runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      # Pins addlicense through an inline mise.toml independent of whatever
+      # the calling repository's own mise.toml does or does not pin.
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+        with:
+          mise_toml: |
+            [tools]
+            "aqua:google/addlicense" = "${{ inputs.addlicense-version }}"
+
+      - name: Check license headers
+        env:
+          COPYRIGHT_HOLDER: ${{ inputs.copyright-holder }}
+          YEAR: ${{ inputs.year }}
+          LICENSE_TYPE: ${{ inputs.license-type }}
+          FIND_COMMANDS: ${{ inputs.find-commands }}
+        run: |
+          files=()
+          while IFS= read -r cmd; do
+            [ -z "${cmd}" ] && continue
+            while IFS= read -r file; do
+              [ -z "${file}" ] && continue
+              files+=("${file}")
+            done < <(bash -c "${cmd}")
+          done <<<"${FIND_COMMANDS}"
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no files matched any of the configured find-commands" >&2
+            exit 1
+          fi
+
+          addlicense -check -c "${COPYRIGHT_HOLDER}" -y "${YEAR}" -l "${LICENSE_TYPE}" \
+            -s=only "${files[@]}"
