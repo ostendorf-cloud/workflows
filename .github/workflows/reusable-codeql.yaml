@@ -1,0 +1,84 @@
+name: reusable-codeql
+
+# Scans one or more languages with CodeQL, generalising the hand-rolled
+# "codeql.yaml" that release-me and web-kit each used to maintain on their
+# own: release-me scanned Go only, web-kit scanned Go and
+# javascript-typescript as a fixed two-entry matrix. This workflow takes the
+# language list as an input instead, so a caller can scan any combination,
+# including "actions" (CodeQL's own language identifier for scanning GitHub
+# Actions workflow YAML).
+#
+# Supplies no trigger of its own: like reusable-dco.yaml, this workflow is
+# meant to be called from a caller's own "push", "pull_request" and
+# "schedule" triggers, matching the shape release-me and web-kit already
+# use (push/pull_request to their default branch, plus a weekly schedule so
+# a newly disclosed vulnerability pattern is caught in code that has not
+# changed). "workflow_call" itself carries none of those triggers from the
+# caller, so the caller's own workflow file still declares them.
+#
+# Inputs:
+#   languages: JSON array of CodeQL language identifiers to scan, for
+#     example '["go", "javascript-typescript", "actions"]'. Required, with
+#     no default: there is no sensible language set for an arbitrary
+#     caller. Each language becomes its own matrix job.
+#
+#     "go" is built with CodeQL's "autobuild" build mode and gets
+#     jdx/mise-action run first, so Go's own toolchain (pinned by the
+#     caller's mise.toml) is on PATH before the build. Every other language
+#     runs with build mode "none", which is correct for
+#     javascript-typescript and actions, both interpreted/data languages
+#     with nothing to build, but would be wrong for a further compiled
+#     language added later without also extending the build-mode and
+#     toolchain logic below.
+#
+#   runs-on-runner: the runner label the job runs on, default
+#     ubuntu-latest. A typed input rather than a hardcoded "ubuntu-latest",
+#     because different consuming repositories may want a different
+#     runner (self-hosted, a different OS, a different size), and
+#     hardcoding one would force every consumer onto the same choice
+#     forever.
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: >-
+          JSON array of CodeQL language identifiers to scan, for example
+          '["go", "javascript-typescript", "actions"]'. Each entry runs as
+          its own matrix job.
+        type: string
+        required: true
+      runs-on-runner:
+        description: Runner label the CodeQL analysis runs on.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }} with CodeQL
+    runs-on: ${{ inputs.runs-on-runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      # Only Go needs its toolchain on PATH before CodeQL's autobuild step;
+      # javascript-typescript and actions have nothing to build.
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+        if: matrix.language == 'go'
+
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          category: "/language:${{ matrix.language }}"
