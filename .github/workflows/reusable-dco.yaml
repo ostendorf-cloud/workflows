@@ -10,6 +10,10 @@ name: reusable-dco
 # "pull_request" event context (github.event.pull_request.*) is what the
 # steps below read.
 #
+# The job checks out this repository's own commit into "workflow-source"
+# and reads no files from the caller. The pull request commits it checks
+# come from the GitHub API, not from a checkout of the caller's code.
+#
 # Inputs:
 #   runs-on-runner: the runner label the job runs on, default
 #     ubuntu-latest. A typed input rather than a hardcoded "ubuntu-latest",
@@ -61,10 +65,112 @@ jobs:
     name: Every commit carries a DCO sign-off
     runs-on: ${{ inputs.runs-on-runner }}
     timeout-minutes: 10
+    # Every "run" step below executes inside this repository's own
+    # checkout, so mise resolves the tools pinned in its "mise.toml" and
+    # the script below is a plain relative path. "RUNNER_TEMP",
+    # "GITHUB_OUTPUT" and "GITHUB_STEP_SUMMARY" are absolute paths, so
+    # this default does not affect them.
+    defaults:
+      run:
+        working-directory: workflow-source
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+      # The exact commit this job's own workflow file was resolved to is
+      # read from the "job" context as JSON, rather than written
+      # straight into a step's "with:" as "job.workflow_sha", because
+      # actionlint 1.7.12, the newest release, does not yet know the
+      # "job.workflow_repository" and "job.workflow_sha" properties exist
+      # (rhysd/actionlint#705). That is a lint gap, not a doubt about the
+      # fields: GitHub documents both as part of the job context. Reading
+      # the context as JSON with jq sidesteps the gap without silencing
+      # actionlint anywhere in this file.
+      #
+      # "job.workflow_repository" and "job.workflow_sha" name the
+      # repository and the commit of the workflow file that defines this
+      # job, which is this file, at the ref the caller pinned. The
+      # "github" context describes the CALLER instead, which is why a
+      # bare checkout further down would check out the caller's
+      # repository, not this one.
+      #
+      # Both values are validated before use, so an empty or malformed
+      # one fails this job outright instead of letting the checkout step
+      # below silently fall back to a default branch.
+      #
+      # "working-directory" overrides the job's own default of
+      # "workflow-source": that directory does not exist yet, the
+      # checkout below is what creates it. "jq" is read from the runner
+      # image here, the same way the later steps' "gh" CLI is, because
+      # this repository's own pinned toolchain is only available once the
+      # checkout below has run.
+      - name: Resolve this workflow's own repository and commit
+        id: source
+        working-directory: ${{ github.workspace }}
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required on the runner but is not installed" >&2
+            exit 1
+          fi
 
+          repository="$(printf '%s' "${JOB_CONTEXT}" |
+            jq -r '.workflow_repository // ""')"
+          sha="$(printf '%s' "${JOB_CONTEXT}" | jq -r '.workflow_sha // ""')"
+
+          case "${repository}" in
+          */*) ;;
+          *)
+            echo "job.workflow_repository is not an owner/repository:" \
+              "'${repository}'" >&2
+            exit 1
+            ;;
+          esac
+
+          case "${sha}" in
+          "" | *[!0-9a-f]*)
+            echo "job.workflow_sha is not a commit SHA: '${sha}'" >&2
+            exit 1
+            ;;
+          esac
+
+          if [ "${#sha}" -ne 40 ]; then
+            echo "job.workflow_sha is not a 40 character commit SHA:" \
+              "'${sha}'" >&2
+            exit 1
+          fi
+
+          echo "repository=${repository}" >>"${GITHUB_OUTPUT}"
+          echo "sha=${sha}" >>"${GITHUB_OUTPUT}"
+
+      # This job never checks out the caller's repository: nothing below
+      # reads the caller's files, the pull request commits come from the
+      # "gh api" call further down. This step checks out this workflow's
+      # own repository instead, into "workflow-source", pinned to the
+      # exact commit the previous step resolved, and every "run" step
+      # below defaults to that directory.
+      #
+      # Pinning to that exact commit, rather than a branch or tag name,
+      # matters because it is the commit the caller's own
+      # "uses: ...@<ref>" resolved to. A caller pinned to a released tag
+      # then runs that tag's script, never whatever sits on "main" when
+      # the job happens to run, and a tag moved after the caller resolved
+      # it cannot change what an already-resolved run executes.
+      #
+      # "persist-credentials: false" because no step below runs an
+      # authenticated git command; only "gh api" talks to GitHub.
+      - name: Check out this workflow's own repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          repository: ${{ steps.source.outputs.repository }}
+          ref: ${{ steps.source.outputs.sha }}
+          path: workflow-source
+          persist-credentials: false
+
+      # "working_directory" points mise at this repository's own
+      # mise.toml, which pins "jq", instead of the workspace root, which
+      # now holds nothing but the "workflow-source" checkout above.
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+        with:
+          working_directory: workflow-source
 
       # The pull request commits endpoint, not git log against the merge
       # base: scripts/check-dco.sh explains why. It is read with
