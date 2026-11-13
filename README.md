@@ -43,9 +43,24 @@ Available and planned workflows:
   ```
 
   `<tag>` is a released version once this workflow has one; it has none yet.
+- Self-hosted Renovate (`reusable-renovate.yaml`): runs self-hosted Renovate for the calling
+  repository, authenticated through the ostendorf-cloud-dependencies GitHub App with a token
+  scoped to only that one repository, so autodiscovery finds exactly that repository and no
+  other. Meant to be called from a caller's own `schedule`, `workflow_dispatch`, and
+  `issues`/`pull_request` `edited` triggers, so a human checking a Renovate rebase checkbox
+  reacts within that run's CI time instead of waiting for the next scheduled tick; this
+  repository's own `renovate.yaml` does exactly that for itself.
+
+  ```yaml
+  jobs:
+    renovate:
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@<tag>
+      secrets: inherit
+  ```
+
+  `<tag>` is a released version once this workflow has one; it has none yet.
 - CodeQL scanning: planned, tracked by its own issue.
 - License-header check: planned, tracked by its own issue.
-- Self-hosted Renovate: planned, tracked by its own issue.
 
 ## Development
 
