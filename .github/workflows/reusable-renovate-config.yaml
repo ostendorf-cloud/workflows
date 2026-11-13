@@ -115,7 +115,13 @@ name: reusable-renovate-config
 #     a version whose validator changes the exact warning text the
 #     missing-config check greps for would silently lose that one check;
 #     bumping the default here is the safer way to move this workflow
-#     forward.
+#     forward. The inline mise.toml below also pins a Node version
+#     alongside this one, to satisfy this exact renovate version's own
+#     "engines.node" requirement (see "Installing renovate" below); the
+#     two pins move together, not automatically. A caller overriding
+#     "renovate-version" to a release whose own "engines.node" the
+#     pinned Node version no longer satisfies needs that Node pin
+#     bumped here too.
 #
 #   strict: whether to append "--strict" to the validator, default false.
 #     "--strict" also fails on a deprecated-but-still-working option that
