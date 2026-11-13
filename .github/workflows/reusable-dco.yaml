@@ -158,7 +158,7 @@ jobs:
       # "persist-credentials: false" because no step below runs an
       # authenticated git command; only "gh api" talks to GitHub.
       - name: Check out this workflow's own repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: ${{ steps.source.outputs.repository }}
           ref: ${{ steps.source.outputs.sha }}
