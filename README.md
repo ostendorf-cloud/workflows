@@ -25,6 +25,19 @@ Available and planned workflows:
 
 - DCO sign-off check (`reusable-dco.yaml`): fails a pull request carrying a commit without a
   valid Developer Certificate of Origin trailer.
+- Renovate configuration check (`reusable-renovate-config.yaml`): fails when a repository's
+  `renovate.json` does not parse, carries an unknown or wrongly typed option, or, with its
+  `strict` input enabled, needs a migration. It does not catch a nonexistent preset named in
+  `extends`: Renovate's own validator does not resolve presets either, so that mistake still
+  only surfaces once the hosted Renovate app runs.
+
+  ```yaml
+  jobs:
+    renovate-config:
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate-config.yaml@<tag>
+  ```
+
+  `<tag>` is a released version once this workflow has one; it has none yet.
 - CodeQL scanning: planned, tracked by its own issue.
 - License-header check: planned, tracked by its own issue.
 - Self-hosted Renovate: planned, tracked by its own issue.
