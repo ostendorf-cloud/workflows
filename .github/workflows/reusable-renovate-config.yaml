@@ -1,0 +1,160 @@
+name: reusable-renovate-config
+
+# Validates a caller's Renovate configuration with Renovate's own
+# "renovate-config-validator", so a malformed config fails in CI instead
+# of only surfacing later as a bot-filed "Action Required: Fix Renovate
+# Configuration" issue once the hosted Renovate app actually runs.
+#
+# What this catches: invalid JSON/JSON5, an unknown top-level option, an
+# option of the wrong type, and, with "strict" enabled, a deprecated
+# option that still works but needs migrating. Also a missing config: on
+# its own, "renovate-config-validator" warns and exits 0 when no config
+# file exists at any of its default locations (confirmed empirically
+# against an empty directory: "WARN: No files to perform configuration
+# validation against", exit 0), which is the same silent-failure shape
+# this workflow exists to prevent, so the validate step below treats
+# that warning as a hard failure instead of trusting the validator's own
+# exit code.
+#
+# What this does NOT catch: a preset named in "extends" that does not
+# exist. "renovate-config-validator" validates the shape of the file it
+# is given; it never resolves "extends" into the presets they name,
+# bundled or remote, with or without "--strict". Confirmed empirically:
+# a config extending a preset name invented for this check, and one
+# extending a nonexistent "github>" preset, both validate clean with no
+# network call attempted. Also a known, acknowledged gap upstream (for
+# example renovatebot/renovate#42501 and FlowMatrix-AI/renovate-config
+# #36): the validator's "parsePreset" step only checks a preset
+# reference's syntax, never whether the named preset resolves to
+# anything. A caller whose "extends" names a preset that does not exist,
+# the exact mistake this workflow exists to catch, still only surfaces
+# once the hosted Renovate app runs. Catching that needs Renovate to
+# actually resolve the config, which needs its platform credentials and
+# is the heavier, different "renovate --dry-run" check this workflow
+# deliberately does not run (see the issue this workflow was built for).
+#
+# Inputs:
+#   runs-on-runner: the runner label the job runs on, default
+#     ubuntu-latest. A typed input rather than a hardcoded
+#     "ubuntu-latest", because different consuming repositories may want
+#     a different runner (self-hosted, a different OS, a different
+#     size), and hardcoding one would force every consumer onto the same
+#     choice forever.
+#
+#   renovate-version: the "renovate" npm package version this workflow
+#     validates against, default "44.238.0" (the latest release at the
+#     time this workflow was written). Pinned here, inside this reusable
+#     workflow, rather than left to whatever the calling repository's own
+#     mise.toml does or does not pin, for the same reason
+#     reusable-license.yaml pins addlicense: the check should run on a
+#     known version regardless of the caller. A caller overriding this to
+#     a version whose validator changes the exact warning text the
+#     missing-config check greps for would silently lose that one check;
+#     bumping the default here is the safer way to move this workflow
+#     forward.
+#
+#   strict: whether to append "--strict" to the validator, default false.
+#     "--strict" also fails on a deprecated-but-still-working option that
+#     needs migrating, a softer problem than a hard validation error.
+#     Left off by default so this workflow fails only on an actual
+#     error, matching the bug it was written to catch; a caller can opt
+#     into the stricter check once ready for it.
+#
+# Installing renovate:
+#   renovate is installed through mise's own "npm:renovate" backend, the
+#   same shape reusable-license.yaml uses for "aqua:google/addlicense":
+#   pinned here, inside this reusable workflow, through an inline
+#   mise.toml, independent of whatever the calling repository's own
+#   mise.toml does or does not pin.
+#
+#   That backend ("aube") also runs a supply-chain trust check while
+#   resolving dependencies, and renovate's own dependency tree currently
+#   trips it: a transitive dependency, "@yarnpkg/libzip@3.2.2", carries
+#   no provenance attestation where its predecessor, 3.2.1, had one (as
+#   did 3.2.1's own predecessor, 3.2.0, the baseline mise's own error
+#   message names), and mise's default trust policy refuses that kind
+#   of trust downgrade. The inline mise.toml below exempts exactly that
+#   package at exactly that version through "trust_policy_excludes",
+#   not the bare package name, so a future @yarnpkg/libzip release is
+#   checked again rather than silently exempted too.
+#
+#   Checking the npm registry metadata for 3.2.1 and 3.2.2 found no sign
+#   of tampering. 3.2.2's "gitHead" is a real, public commit in
+#   yarnpkg/berry, titled "Releasing 16 new packages", that itself bumps
+#   "@yarnpkg/libzip" to 3.2.2 and was authored by the project's own
+#   release bot the same day as the npm publish: the tarball matches the
+#   ordinary automated release, only the "npm publish" step ran outside
+#   the attested CI flow that produced 3.2.1. That publish came from a
+#   different npm account, "arcanis" rather than 3.2.1's "yarnbot", but
+#   both publish as the same person: "arcanis" publishes as
+#   "nison.mael@gmail.com", "yarnbot" as the plus-addressed
+#   "nison.mael+yarnbot.npm@gmail.com". A manual publish of a normal
+#   release by that release's own maintainer, not a different, unknown
+#   party.
+on:
+  workflow_call:
+    inputs:
+      runs-on-runner:
+        description: Runner label the Renovate configuration check runs on.
+        type: string
+        default: ubuntu-latest
+      renovate-version:
+        description: Version of the "renovate" npm package to validate against.
+        type: string
+        default: "44.238.0"
+      strict:
+        description: >-
+          Append "--strict" to renovate-config-validator, so a deprecated option
+          that still works but needs migrating also fails the job.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Renovate configuration is valid
+    runs-on: ${{ inputs.runs-on-runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      # Pins renovate through an inline mise.toml independent of whatever
+      # the calling repository's own mise.toml does or does not pin. The
+      # "trust_policy_excludes" entry exempts exactly one known,
+      # investigated transitive dependency from mise's npm-backend
+      # supply-chain trust check: see the "Installing renovate" comment
+      # above for why it is there and why it is scoped this narrowly.
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+        with:
+          mise_toml: |
+            [tools."npm:renovate"]
+            version = "${{ inputs.renovate-version }}"
+            trust_policy_excludes = ["@yarnpkg/libzip@3.2.2"]
+
+      # "renovate-config-validator" exits 0 and only warns when no config
+      # file exists at any of its default locations, see the "What this
+      # catches" comment above, so that warning is treated as a failure
+      # here rather than trusting the validator's own exit code alone.
+      - name: Validate the Renovate configuration
+        env:
+          STRICT: ${{ inputs.strict }}
+        run: |
+          args=()
+          if [ "${STRICT}" = "true" ]; then
+            args+=(--strict)
+          fi
+
+          code=0
+          output="$(renovate-config-validator "${args[@]}" 2>&1)" || code=$?
+          printf '%s\n' "${output}"
+
+          if printf '%s\n' "${output}" |
+            grep -qF "No files to perform configuration validation against"; then
+            echo "no Renovate configuration file was found at any of its" \
+              "default locations" >&2
+            exit 1
+          fi
+
+          exit "${code}"
