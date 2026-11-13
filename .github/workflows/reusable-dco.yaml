@@ -168,7 +168,7 @@ jobs:
       # "working_directory" points mise at this repository's own
       # mise.toml, which pins "jq", instead of the workspace root, which
       # now holds nothing but the "workflow-source" checkout above.
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
         with:
           working_directory: workflow-source
 

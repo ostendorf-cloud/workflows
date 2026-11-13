@@ -71,7 +71,7 @@ jobs:
 
       # Only Go needs its toolchain on PATH before CodeQL's autobuild step;
       # javascript-typescript and actions have nothing to build.
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
         if: matrix.language == 'go'
 
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3

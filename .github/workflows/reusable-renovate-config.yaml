@@ -190,7 +190,7 @@ jobs:
       # investigated transitive dependency from mise's npm-backend
       # supply-chain trust check: see the "Installing renovate" comment
       # above for why it is there and why it is scoped this narrowly.
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db  # v3.6.3
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
         with:
           mise_toml: |
             [tools."npm:renovate"]
