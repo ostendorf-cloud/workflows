@@ -41,6 +41,7 @@ Available and planned workflows:
     renovate-config:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate-config.yaml@v0.2.0
   ```
+
 - Self-hosted Renovate (`reusable-renovate.yaml`): runs self-hosted Renovate for the calling
   repository, authenticated through the ostendorf-cloud-dependencies GitHub App with a token
   scoped to only that one repository, so autodiscovery finds exactly that repository and no
@@ -67,6 +68,7 @@ Available and planned workflows:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@v0.2.0
       secrets: inherit
   ```
+
 - CodeQL scanning: planned, tracked by its own issue.
 - License-header check: planned, tracked by its own issue.
 
