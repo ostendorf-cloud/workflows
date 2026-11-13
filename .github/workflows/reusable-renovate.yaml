@@ -72,22 +72,6 @@ on:
 permissions:
   contents: read
 
-# One Renovate run at a time for the calling repository. "github.workflow"
-# inside a called reusable workflow resolves to the CALLER's workflow name,
-# not this file's own "name:" above, because the called job runs as part of
-# the caller's run (confirmed against GitHub's own docs and community
-# guidance on reusable workflows). Concurrency groups are themselves scoped
-# to one repository, never shared across repositories, so two different
-# repositories each calling this workflow from a caller also named
-# "renovate" do not collide with each other; only runs within the same
-# repository share this group. That is exactly the old central workflow's
-# "group: ${{ github.workflow }}" intent, carried over unchanged: serialise
-# every trigger (schedule, manual dispatch, a rebase checkbox edit) for one
-# repository's own Renovate run, rather than letting them overlap.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 jobs:
   renovate:
     name: Self-hosted Renovate
@@ -103,10 +87,15 @@ jobs:
     # all read the CALLER's own triggering event here, exactly as they would
     # read in the caller's own workflow file (this is the same mechanism,
     # just one level deeper, as "github.workflow" resolving to the caller's
-    # workflow name in the concurrency comment above). Centralizing the
+    # workflow name in the concurrency comment below). Centralizing the
     # condition here means one copy of this safety-critical check instead
     # of one per rollout repository, removing the copy-paste risk of each
     # caller having to reproduce it on its own.
+    #
+    # This "if:" is deliberately evaluated before "concurrency:" below,
+    # not the other way around; see that key's own comment for why the
+    # order matters for what a skipped run reports on the triggering pull
+    # request.
     #
     # What fires:
     #   - every "schedule" tick on the caller;
@@ -160,6 +149,74 @@ jobs:
           github.event.pull_request.user.login == 'ostendorf-cloud-dependencies[bot]'
         )
       )
+    # One Renovate run at a time for the calling repository: "github.workflow"
+    # inside a called reusable workflow resolves to the CALLER's workflow
+    # name, not this file's own "name:" above, because the called job runs
+    # as part of the caller's run (confirmed against GitHub's own docs and
+    # community guidance on reusable workflows). Concurrency groups are
+    # themselves scoped to one repository, never shared across
+    # repositories, so two different repositories each calling this
+    # workflow from a caller also named "renovate" do not collide with each
+    # other; only runs within the same repository share this group. That is
+    # exactly the old central workflow's "group: ${{ github.workflow }}"
+    # intent, carried over unchanged: serialise every genuine trigger
+    # (schedule, manual dispatch, a real rebase checkbox edit) for one
+    # repository's own Renovate run, rather than letting them overlap.
+    #
+    # This key is deliberately job-level, not workflow-level (it was
+    # workflow-level originally; moved here to fix a real incident). GitHub
+    # Actions evaluates a job's own "if:" above before deciding whether that
+    # job joins its job-level concurrency group at all; a job whose "if:"
+    # is false never joins the group and is reported as "skipped" by that
+    # job, full stop. Workflow-level concurrency does not get that
+    # ordering: the whole workflow run is placed into its group as soon as
+    # the triggering event arrives, before any job's "if:" runs, so a run
+    # that was always going to skip still occupies a concurrency slot.
+    # GitHub keeps only the newest pending run per group and cancels every
+    # other pending one; a run cancelled while merely pending never reaches
+    # its job, so its "if:" is never evaluated and the anti-loop guard
+    # above never gets a chance to produce "skipped" for it. That cancelled
+    # run then reports as a failed check on whatever pull request triggered
+    # it, unrelated to that pull request's own contents.
+    #
+    # This is exactly what happened in practice: one Renovate run rebasing
+    # several pull requests fires one "pull_request: edited" event per
+    # rebase, every one of them sent by the dependencies bot itself, so
+    # every one of them is an event the "if:" above was always going to
+    # evaluate to false for. With concurrency at the workflow level, all of
+    # those runs piled into the single per-repository group before any of
+    # them reached their job; GitHub Actions cancelled all but the newest
+    # while they were still pending, and each caller pull request that had
+    # been rebased ended up with a cancelled, failing check that had
+    # nothing to do with the guard, or with its own contents. Moving
+    # "concurrency:" to this job means every one of those bot-sender runs
+    # now evaluates "if:" immediately, finds it false, and is reported as
+    # "skipped" before it could ever be queued, let alone cancelled.
+    #
+    # A genuine trigger (a "schedule" tick, a "workflow_dispatch", or a
+    # human actually ticking the rebase checkbox, all of which still
+    # satisfy "if:") still joins this same per-repository group and still
+    # serialises against every other genuine trigger exactly as before;
+    # only a run that the guard was always going to skip no longer competes
+    # for that slot, or shows up as a red check for it.
+    #
+    # Scoping the group per pull request instead (for example
+    # "${{ github.workflow }}-${{ github.event.pull_request.number }}")
+    # was considered and rejected: Renovate's autodiscover run processes
+    # every pull request of the repository in one process, not just the
+    # one that triggered it, so allowing two such runs for the same
+    # repository at once risks two Renovate processes rebasing, force
+    # pushing or editing the same branches and issue bodies concurrently.
+    # The anti-loop guard above does not cover that risk at all; it only
+    # ever decides whether a single run's job executes, never whether two
+    # already-admitted runs may execute at the same time. Dropping the
+    # caller's "pull_request: edited" trigger instead was also rejected:
+    # that trigger is what makes a human's rebase checkbox take effect
+    # within this run's own CI time rather than waiting for the next
+    # "schedule" tick, a genuinely useful mechanism this change keeps.
+    concurrency:
+      group: ${{ github.workflow }}
+      cancel-in-progress: false
     # A "workflow_call"-only trigger, like reusable-dco.yaml and
     # reusable-renovate-config.yaml, so "inputs" is always populated by the
     # caller and never null at runtime. Unlike the old workflow, which also
