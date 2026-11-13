@@ -49,9 +49,21 @@ Available and planned workflows:
   other. Meant to be called from a caller's own `schedule`, `workflow_dispatch`, and
   `issues`/`pull_request` `edited` triggers, so a human checking a Renovate rebase checkbox
   reacts within that run's CI time instead of waiting for the next scheduled tick; this
-  repository's own `renovate.yaml` does exactly that for itself.
+  repository's own `renovate.yaml` does exactly that for itself. The anti-loop logic deciding
+  whether an `edited` event should actually trigger a run lives inside `reusable-renovate.yaml`
+  itself, as a job-level `if:`, so a caller does not need to write or get that condition right:
+  every caller gets the same centralized check.
 
   ```yaml
+  on:
+    schedule:
+      - cron: "17 3 * * *" # an example schedule; pick any cron that fits your repository
+    workflow_dispatch:
+    issues:
+      types: [edited]
+    pull_request:
+      types: [edited]
+
   jobs:
     renovate:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@<tag>

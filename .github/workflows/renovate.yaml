@@ -22,6 +22,18 @@ name: renovate
 # repository it happens in, not to the app installation. A per-repository
 # caller workflow like this one can, because the event now belongs to the
 # very repository the workflow file lives in.
+#
+# "pull_request: edited" (not "pull_request_target") resolves and runs this
+# workflow's own YAML from the pull request's merge ref, not from the
+# default branch. A pull request that modified these very workflow files
+# (for example bumping a pinned action digest) would run that modified
+# version, with the dependencies app's private key available through
+# "secrets: inherit", the moment its rebase checkbox is edited. This is NOT
+# fork-exploitable: the anti-loop "if:" (centralized in
+# "reusable-renovate.yaml", see that file's "renovate" job) still requires
+# the pull request be authored by "ostendorf-cloud-dependencies[bot]"
+# before anything runs, and an external fork cannot author a pull request
+# as that trusted, org-controlled bot.
 on:
   # Unchanged from the retired workflow.
   schedule:
@@ -37,68 +49,26 @@ on:
   pull_request:
     types: [edited]
 
-# "contents: read" is enough for this caller: the "if:" below only reads
-# event payload fields, which needs no permission at all, and the actual
-# Renovate run's permissions come from the token "reusable-renovate.yaml"
-# mints for itself, not from this workflow's own GITHUB_TOKEN.
+# "contents: read" is enough for this caller: it only declares triggers and
+# calls "reusable-renovate.yaml" unconditionally, needing no permission of
+# its own, and the actual Renovate run's permissions come from the token
+# "reusable-renovate.yaml" mints for itself, not from this workflow's own
+# GITHUB_TOKEN.
 permissions:
   contents: read
 
 jobs:
   renovate:
     name: Call reusable-renovate
-    # Gates the whole job, rather than something inside
-    # "reusable-renovate.yaml": that reusable workflow has no way to know
-    # what "Dependency Dashboard" or "authored by the dependencies bot"
-    # means for an arbitrary caller. Deciding WHEN to call it is this
-    # entire local workflow's only job, so a job-level "if:" is the
-    # natural place for that decision.
-    #
-    # What fires:
-    #   - every "schedule" tick;
-    #   - every manual "workflow_dispatch";
-    #   - an "issues"/"pull_request" "edited" event, but only when BOTH of:
-    #     (a) the issue is the Dependency Dashboard, or the pull request is
-    #         authored by the dependencies bot, AND
-    #     (b) the edit's sender is NOT the dependencies bot itself.
-    #
-    # What does NOT fire:
-    #   - Renovate's own edit of the Dependency Dashboard issue body or of
-    #     one of its own pull request bodies during a normal run. Every
-    #     such edit carries "github.event.sender.login" ==
-    #     "ostendorf-cloud-dependencies[bot]" (the dependencies bot is the
-    #     one making the edit), so condition (b) above excludes it. This is
-    #     the load-bearing anti-loop guard: without it, this workflow would
-    #     retrigger itself on every one of its own runs that touches either
-    #     body, forever.
-    #   - any edit, by any actor, to an issue that is not the Dependency
-    #     Dashboard or a pull request not authored by the dependencies bot:
-    #     condition (a) excludes it.
-    #
-    # The Dependency Dashboard issue has no stable issue number to check
-    # ahead of time in a static workflow file, and Renovate assigns it no
-    # guaranteed label either, so this condition matches on
-    # "github.event.issue.title == 'Dependency Dashboard'" instead:
-    # Renovate's own documented default title for that issue
-    # (docs.renovatebot.com, "dependencyDashboard.title", default
-    # "Dependency Dashboard"). A repository that ever configures a custom
-    # dashboard title would need this condition updated to match; this
-    # repository does not.
-    #
-    # Property access on a context field that does not exist for the
-    # current event (for example "github.event.issue" on a "schedule" or
-    # "pull_request" event) evaluates to null rather than failing the
-    # expression, so each side of the "||"/"&&" below is safe to evaluate
-    # regardless of which event triggered this run.
-    if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event.sender.login != 'ostendorf-cloud-dependencies[bot]' &&
-        (
-          github.event.issue.title == 'Dependency Dashboard' ||
-          github.event.pull_request.user.login == 'ostendorf-cloud-dependencies[bot]'
-        )
-      )
+    # Calls "reusable-renovate.yaml" unconditionally on every trigger above:
+    # every "schedule" tick, every manual "workflow_dispatch", and every
+    # "issues"/"pull_request" "edited" event, regardless of sender or of
+    # which issue or pull request was edited. The anti-loop decision that
+    # used to gate this job directly now lives inside
+    # "reusable-renovate.yaml" itself, as that reusable workflow's own
+    # job-level "if:", so there is one centralized copy of the condition
+    # instead of one per calling repository. See that file's "renovate"
+    # job for the actual condition and the reasoning behind moving it
+    # there.
     uses: ./.github/workflows/reusable-renovate.yaml
     secrets: inherit
