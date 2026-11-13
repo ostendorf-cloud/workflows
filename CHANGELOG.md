@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.2.0](https://github.com/ostendorf-cloud/workflows/compare/v0.1.1...v0.2.0) (2026-11-13)
+
+### Features
+
+- **workflows:** run renovate per repository on checkbox edits ([#29](https://github.com/ostendorf-cloud/workflows/pull/29))
+- **workflows:** resolve extends presets with renovate --platform=local ([#26](https://github.com/ostendorf-cloud/workflows/pull/26))
+- **workflows:** add a reusable Renovate config validation workflow ([#24](https://github.com/ostendorf-cloud/workflows/pull/24))
+
+### Bug Fixes
+
+- **renovate:** scope the app token to the whole organisation ([#19](https://github.com/ostendorf-cloud/workflows/pull/19))
+
 ## [v0.1.1](https://github.com/ostendorf-cloud/workflows/compare/v0.1.0...v0.1.1) (2026-11-12)
 
 ### Bug Fixes
