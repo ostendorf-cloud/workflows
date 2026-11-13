@@ -1,37 +1,79 @@
 name: reusable-renovate-config
 
-# Validates a caller's Renovate configuration with Renovate's own
-# "renovate-config-validator", so a malformed config fails in CI instead
-# of only surfacing later as a bot-filed "Action Required: Fix Renovate
-# Configuration" issue once the hosted Renovate app actually runs.
+# Validates a caller's Renovate configuration two different ways, so a
+# malformed config or an unresolvable preset fails in CI instead of only
+# surfacing later as a bot-filed "Action Required: Fix Renovate
+# Configuration" issue once the hosted Renovate app actually runs. The
+# first step runs Renovate's own "renovate-config-validator", which
+# catches schema and type problems fast and with zero network access.
+# The second step runs the real "renovate" binary itself with
+# "--platform=local --config-validation-error", which actually resolves
+# "extends" into the presets it names, catching the one mistake the
+# first step cannot see.
 #
 # What this catches: invalid JSON/JSON5, an unknown top-level option, an
 # option of the wrong type, and, with "strict" enabled, a deprecated
-# option that still works but needs migrating. Also a missing config: on
-# its own, "renovate-config-validator" warns and exits 0 when no config
-# file exists at any of its default locations (confirmed empirically
-# against an empty directory: "WARN: No files to perform configuration
+# option that still works but needs migrating, all from the first,
+# "renovate-config-validator" step. Also a missing config: on its own,
+# "renovate-config-validator" warns and exits 0 when no config file
+# exists at any of its default locations (confirmed empirically against
+# an empty directory: "WARN: No files to perform configuration
 # validation against", exit 0), which is the same silent-failure shape
 # this workflow exists to prevent, so the validate step below treats
 # that warning as a hard failure instead of trusting the validator's own
 # exit code.
 #
-# What this does NOT catch: a preset named in "extends" that does not
-# exist. "renovate-config-validator" validates the shape of the file it
-# is given; it never resolves "extends" into the presets they name,
-# bundled or remote, with or without "--strict". Confirmed empirically:
-# a config extending a preset name invented for this check, and one
-# extending a nonexistent "github>" preset, both validate clean with no
-# network call attempted. Also a known, acknowledged gap upstream (for
-# example renovatebot/renovate#42501 and FlowMatrix-AI/renovate-config
-# #36): the validator's "parsePreset" step only checks a preset
-# reference's syntax, never whether the named preset resolves to
-# anything. A caller whose "extends" names a preset that does not exist,
-# the exact mistake this workflow exists to catch, still only surfaces
-# once the hosted Renovate app runs. Catching that needs Renovate to
-# actually resolve the config, which needs its platform credentials and
-# is the heavier, different "renovate --dry-run" check this workflow
-# deliberately does not run (see the issue this workflow was built for).
+# The second step then catches what the first cannot: a preset named in
+# "extends" that does not exist. Running the real "renovate" binary with
+# "--platform=local" treats the already checked-out working directory as
+# the one and only repository to process, with no clone, no login and no
+# write, which is why it needs no token and no other platform credential
+# to actually resolve a preset reference, bundled/shorthand ones
+# included. Confirmed empirically: a config extending
+# "config:recommended" and the nonexistent ":pinDigests" fails with
+# "Cannot find preset's package (:pinDigests)" and exit code 1, the same
+# config with only "config:recommended" passes with exit code 0, and
+# "renovate-config-validator" still passes on that same clean config too.
+# "--platform=local" alone is not enough: without
+# "--config-validation-error" the identical ":pinDigests" run logs the
+# same error but exits 0 at the shell level, so the flag is required or
+# this step would silently always pass. A preset reference that names a
+# real, remote source is resolved too, not only bundled ones: confirmed
+# empirically with a "github>" preset pointing at a deliberately
+# nonexistent organisation and repository, which made a real,
+# unauthenticated HTTPS request to the GitHub contents API
+# ("GET https://api.github.com/repos/.../contents/default.json", 404 Not
+# Found, about 220ms per request) and then failed the same way, with
+# exit code 1, in under two seconds total. GitHub's contents API serves
+# public repository content to unauthenticated requests, which is why no
+# token was needed for that request to resolve for real instead of
+# hanging or silently skipping.
+#
+# What this does NOT catch: a preset hosted in a private, credential-
+# gated remote source. The same unauthenticated GitHub contents API
+# request described above returns the same 404 Not Found for a private
+# repository it cannot read as it does for one that genuinely does not
+# exist, so this step fails a caller's config that extends a real,
+# private preset exactly as if the name were a typo: "Cannot find
+# preset's package", exit code 1. That failure is the same fail-closed
+# shape as every other case here, never a hang and never a silent pass,
+# but it is a real "not supported" case rather than a bug: this workflow
+# does not accept a platform token, deliberately, because nothing
+# observed while building it needs one, and adding one "just in case"
+# would hand every caller a reason to pass a token it mostly will not
+# use. A caller who genuinely needs a private, token-gated preset
+# resolved is out of scope for now. Also still out of scope, unchanged
+# from before: the known, acknowledged gap upstream in
+# "renovate-config-validator" itself (for example
+# renovatebot/renovate#42501 and FlowMatrix-AI/renovate-config #36),
+# whose "parsePreset" step only checks a preset reference's syntax,
+# never whether it resolves to anything, which is exactly why the second
+# step exists. The first step still earns its keep even after the second
+# one exists: it is instant and has zero network dependency, so it keeps
+# validating schema and type problems for a caller even if the network
+# path to a preset registry is ever flaky or unreachable from the
+# runner, a case the second step cannot tell apart from a genuinely bad
+# preset.
 #
 # Inputs:
 #   runs-on-runner: the runner label the job runs on, default
@@ -43,9 +85,12 @@ name: reusable-renovate-config
 #
 #   renovate-version: the "renovate" npm package version this workflow
 #     validates against, default "44.238.0" (the latest release at the
-#     time this workflow was written). Pinned here, inside this reusable
-#     workflow, rather than left to whatever the calling repository's own
-#     mise.toml does or does not pin, for the same reason
+#     time this workflow was written). Used for both steps below, the
+#     "renovate-config-validator" step and the "renovate --platform=local"
+#     step, since both binaries ship from the same npm package. Pinned
+#     here, inside this reusable workflow, rather than left to whatever
+#     the calling repository's own mise.toml does or does not pin, for
+#     the same reason
 #     reusable-license.yaml pins addlicense: the check should run on a
 #     known version regardless of the caller. A caller overriding this to
 #     a version whose validator changes the exact warning text the
@@ -157,4 +202,33 @@ jobs:
             exit 1
           fi
 
+          exit "${code}"
+
+      # The step above never resolves "extends" into the presets it
+      # names, see the "What this catches" comment above. This step
+      # does, by running the real "renovate" binary itself instead of
+      # its validator, against the working directory that
+      # "actions/checkout" already checked out earlier in this job.
+      # "--platform=local" treats that working directory as the one and
+      # only repository to process, with no clone, no login and no write
+      # (confirmed empirically: every action it would otherwise take is
+      # instead logged as "DRY-RUN: Would ..."), which is why no token
+      # or other platform credential is configured here.
+      # "--config-validation-error" is required alongside it:
+      # "--platform=local" alone logs an unresolved preset as an error
+      # but still exits 0 at the shell level (confirmed empirically
+      # against the same config: identical log output, exit code 0
+      # without the flag, exit code 1 with it), so without it this step
+      # would silently always pass. A missing config file is not
+      # re-checked here: on its own this command exits 0 and proceeds
+      # into a dry-run onboarding flow when no config file exists
+      # (confirmed empirically against an empty directory), but the
+      # step above has already hard-failed and stopped the job before
+      # this one runs in that case, so it never actually has to handle
+      # it.
+      - name: Resolve the Renovate configuration's presets
+        run: |
+          code=0
+          output="$(renovate --platform=local --config-validation-error 2>&1)" || code=$?
+          printf '%s\n' "${output}"
           exit "${code}"
