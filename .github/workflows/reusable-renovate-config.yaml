@@ -47,7 +47,11 @@ name: reusable-renovate-config
 #     workflow, rather than left to whatever the calling repository's own
 #     mise.toml does or does not pin, for the same reason
 #     reusable-license.yaml pins addlicense: the check should run on a
-#     known version regardless of the caller.
+#     known version regardless of the caller. A caller overriding this to
+#     a version whose validator changes the exact warning text the
+#     missing-config check greps for would silently lose that one check;
+#     bumping the default here is the safer way to move this workflow
+#     forward.
 #
 #   strict: whether to append "--strict" to the validator, default false.
 #     "--strict" also fails on a deprecated-but-still-working option that
