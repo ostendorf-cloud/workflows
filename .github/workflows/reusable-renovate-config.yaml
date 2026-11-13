@@ -7,7 +7,14 @@ name: reusable-renovate-config
 #
 # What this catches: invalid JSON/JSON5, an unknown top-level option, an
 # option of the wrong type, and, with "strict" enabled, a deprecated
-# option that still works but needs migrating.
+# option that still works but needs migrating. Also a missing config: on
+# its own, "renovate-config-validator" warns and exits 0 when no config
+# file exists at any of its default locations (confirmed empirically
+# against an empty directory: "WARN: No files to perform configuration
+# validation against", exit 0), which is the same silent-failure shape
+# this workflow exists to prevent, so the validate step below treats
+# that warning as a hard failure instead of trusting the validator's own
+# exit code.
 #
 # What this does NOT catch: a preset named in "extends" that does not
 # exist. "renovate-config-validator" validates the shape of the file it
@@ -59,19 +66,27 @@ name: reusable-renovate-config
 #   That backend ("aube") also runs a supply-chain trust check while
 #   resolving dependencies, and renovate's own dependency tree currently
 #   trips it: a transitive dependency, "@yarnpkg/libzip@3.2.2", carries
-#   no provenance attestation where its predecessor, 3.2.0, had one, and
-#   mise's default trust policy refuses that kind of trust downgrade.
-#   The inline mise.toml below exempts exactly that package at exactly
-#   that version through "trust_policy_excludes", not the bare package
-#   name, so a future @yarnpkg/libzip release is checked again rather
-#   than silently exempted too. Checking the npm registry metadata for
-#   both releases found no sign of tampering: 3.2.2 was published by
-#   arcanis, the same long-standing Yarn maintainer the package has
-#   always listed as a maintainer, including on the 3.2.0 release that
-#   did carry attestation. The missing attestation on 3.2.2 is
-#   consistent with a manual release outside the automated, CI-driven
-#   publish flow that produces attestation, not with a compromised
-#   package.
+#   no provenance attestation where its predecessor, 3.2.1, had one (as
+#   did 3.2.1's own predecessor, 3.2.0, the baseline mise's own error
+#   message names), and mise's default trust policy refuses that kind
+#   of trust downgrade. The inline mise.toml below exempts exactly that
+#   package at exactly that version through "trust_policy_excludes",
+#   not the bare package name, so a future @yarnpkg/libzip release is
+#   checked again rather than silently exempted too.
+#
+#   Checking the npm registry metadata for 3.2.1 and 3.2.2 found no sign
+#   of tampering. 3.2.2's "gitHead" is a real, public commit in
+#   yarnpkg/berry, titled "Releasing 16 new packages", that itself bumps
+#   "@yarnpkg/libzip" to 3.2.2 and was authored by the project's own
+#   release bot the same day as the npm publish: the tarball matches the
+#   ordinary automated release, only the "npm publish" step ran outside
+#   the attested CI flow that produced 3.2.1. That publish came from a
+#   different npm account, "arcanis" rather than 3.2.1's "yarnbot", but
+#   both publish as the same person: "arcanis" publishes as
+#   "nison.mael@gmail.com", "yarnbot" as the plus-addressed
+#   "nison.mael+yarnbot.npm@gmail.com". A manual publish of a normal
+#   release by that release's own maintainer, not a different, unknown
+#   party.
 on:
   workflow_call:
     inputs:
@@ -114,6 +129,10 @@ jobs:
             version = "${{ inputs.renovate-version }}"
             trust_policy_excludes = ["@yarnpkg/libzip@3.2.2"]
 
+      # "renovate-config-validator" exits 0 and only warns when no config
+      # file exists at any of its default locations, see the "What this
+      # catches" comment above, so that warning is treated as a failure
+      # here rather than trusting the validator's own exit code alone.
       - name: Validate the Renovate configuration
         env:
           STRICT: ${{ inputs.strict }}
@@ -123,4 +142,15 @@ jobs:
             args+=(--strict)
           fi
 
-          renovate-config-validator "${args[@]}"
+          code=0
+          output="$(renovate-config-validator "${args[@]}" 2>&1)" || code=$?
+          printf '%s\n' "${output}"
+
+          if printf '%s\n' "${output}" |
+            grep -qF "No files to perform configuration validation against"; then
+            echo "no Renovate configuration file was found at any of its" \
+              "default locations" >&2
+            exit 1
+          fi
+
+          exit "${code}"
