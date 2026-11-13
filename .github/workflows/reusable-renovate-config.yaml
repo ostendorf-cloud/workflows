@@ -115,7 +115,13 @@ name: reusable-renovate-config
 #     a version whose validator changes the exact warning text the
 #     missing-config check greps for would silently lose that one check;
 #     bumping the default here is the safer way to move this workflow
-#     forward.
+#     forward. The inline mise.toml below also pins a Node version
+#     alongside this one, to satisfy this exact renovate version's own
+#     "engines.node" requirement (see "Installing renovate" below); the
+#     two pins move together, not automatically. A caller overriding
+#     "renovate-version" to a release whose own "engines.node" the
+#     pinned Node version no longer satisfies needs that Node pin
+#     bumped here too.
 #
 #   strict: whether to append "--strict" to the validator, default false.
 #     "--strict" also fails on a deprecated-but-still-working option that
@@ -130,6 +136,27 @@ name: reusable-renovate-config
 #   pinned here, inside this reusable workflow, through an inline
 #   mise.toml, independent of whatever the calling repository's own
 #   mise.toml does or does not pin.
+#
+#   The same inline mise.toml also pins an explicit Node.js version.
+#   Without it, both steps below ran against whatever Node a runner
+#   happened to already have on its "PATH", which made this reusable
+#   workflow's own behaviour depend on the runner, not on anything
+#   pinned here: confirmed failing identically in real CI on
+#   "ostendorf-cloud/calbridge" PR #17, "ostendorf-cloud/skills" PR #138
+#   and "ostendorf-cloud/solobill" PR #22, each with
+#   "TypeError: RegExp.escape is not a function" thrown from inside
+#   renovate's own "bazel/rules/http.ts" module, during module load,
+#   before either step even reaches a caller's config. Renovate
+#   44.238.0's own "package.json" declares
+#   "engines.node": "^24.11.0 || ^26.13.0" (confirmed by reading that
+#   file out of the installed npm package), because "RegExp.escape" is a
+#   Stage 4 TC39 proposal only implemented from Node 24 onward; every
+#   failing runner above had Node 22.23.4 ambient instead. Pinning
+#   "[tools.node]" here, the same way "[tools."npm:renovate"]" below is
+#   already pinned, makes both steps run on a known-good Node regardless
+#   of the runner, rather than only passing by accident of image
+#   snapshot, the same reason "ostendorf-cloud/govue" happened not to
+#   hit this while every other caller did.
 #
 #   That backend ("aube") also runs a supply-chain trust check while
 #   resolving dependencies, and renovate's own dependency tree currently
@@ -184,8 +211,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # Pins renovate through an inline mise.toml independent of whatever
-      # the calling repository's own mise.toml does or does not pin. The
+      # Pins renovate, and the Node.js it runs on, through an inline
+      # mise.toml independent of whatever the calling repository's own
+      # mise.toml does or does not pin. The "[tools.node]" pin exists so
+      # both steps below run on a known-good Node instead of whatever a
+      # runner happens to have ambient: see the "Installing renovate"
+      # comment above for the "RegExp.escape is not a function" crash
+      # that caused and why "24.11.0" specifically satisfies renovate
+      # 44.238.0's own "engines.node" requirement. The
       # "trust_policy_excludes" entry exempts exactly one known,
       # investigated transitive dependency from mise's npm-backend
       # supply-chain trust check: see the "Installing renovate" comment
@@ -193,6 +226,9 @@ jobs:
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
         with:
           mise_toml: |
+            [tools.node]
+            version = "24.11.0"
+
             [tools."npm:renovate"]
             version = "${{ inputs.renovate-version }}"
             trust_policy_excludes = ["@yarnpkg/libzip@3.2.2"]

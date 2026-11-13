@@ -73,3 +73,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
       - run: task test:shell
+
+  # Dogfooding: validates this repository's own renovate.json with the
+  # same reusable workflow it publishes for every other repository to
+  # call, the same local "uses:" self-call "dco.yaml" and "renovate.yaml"
+  # already use for "reusable-dco.yaml" and "reusable-renovate.yaml".
+  # Before this job existed, nothing in this repository ever ran
+  # "reusable-renovate-config.yaml" on itself, which is why a Node
+  # version bug in it reached four consumer repositories before this
+  # repository's own CI caught anything.
+  renovate-config:
+    uses: ./.github/workflows/reusable-renovate-config.yaml
