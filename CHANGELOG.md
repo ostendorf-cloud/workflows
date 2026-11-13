@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.1](https://github.com/ostendorf-cloud/workflows/compare/v0.2.0...v0.2.1) (2026-11-13)
+
+### Bug Fixes
+
+- **renovate-config:** pin an explicit Node.js version ([#33](https://github.com/ostendorf-cloud/workflows/pull/33))
+
 ## [v0.2.0](https://github.com/ostendorf-cloud/workflows/compare/v0.1.1...v0.2.0) (2026-11-13)
 
 ### Features
