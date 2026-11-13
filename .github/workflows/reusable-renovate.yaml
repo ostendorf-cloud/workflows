@@ -1,0 +1,205 @@
+name: reusable-renovate
+
+# Runs self-hosted Renovate for the CALLING repository only, authenticated
+# through the ostendorf-cloud-dependencies GitHub App, with a token scoped to
+# just that one repository.
+#
+# This replaces the old, now retired central "renovate.yaml" in this
+# repository, which ran org-wide: that workflow minted its token with
+# "owner: ${{ github.repository_owner }}" on
+# "actions/create-github-app-token", which scopes the token to every
+# repository the GitHub App is installed on, and then relied on
+# "RENOVATE_AUTODISCOVER" to iterate all of them in a single job. This
+# workflow deliberately omits both "owner" and "repositories" on the same
+# action. Per the action's own documented behaviour, omitting both scopes
+# the minted token to only the repository the calling job is currently
+# running in, never the whole organisation. That is the architectural
+# change behind issue #28: each repository now calls this reusable workflow
+# for itself, from its own triggers, instead of one central job polling
+# every repository on a fixed cron.
+#
+# "RENOVATE_AUTODISCOVER" stays "true" below, even though the token now
+# only ever sees one repository. Autodiscovery works by asking the
+# platform (here, the GitHub API) which repositories the given token can
+# see, then processing all of them. A token scoped to one repository makes
+# that search return exactly that one repository, so autodiscovery still
+# finds the right (now much smaller) result set through the same
+# mechanism the old org-wide workflow used, just starting from a
+# differently scoped token. There is no need to switch to
+# "RENOVATE_REPOSITORIES" naming the repository explicitly.
+#
+# Inputs:
+#   runs-on-runner: the runner label the job runs on, default
+#     ubuntu-latest. A typed input rather than a hardcoded
+#     "ubuntu-latest", because different consuming repositories may want a
+#     different runner (self-hosted, a different OS, a different size),
+#     and hardcoding one would force every consumer onto the same choice
+#     forever.
+#
+# Secrets:
+#   GH_APP_DEPENDENCIES_PRIVATE_KEY: private key of the organisation's
+#     dependencies GitHub App (ostendorf-cloud-dependencies), used to mint
+#     the repository-scoped token Renovate runs with. Required: unlike
+#     reusable-dco's security app key, there is no sensible degraded mode
+#     without it, Renovate simply cannot run at all without a token.
+#
+#   vars.GH_APP_DEPENDENCIES_APP_ID, the dependencies app's app id, is an
+#   organisation-level variable, automatically available in a called
+#   reusable workflow with no declaration and no "secrets: inherit", so it
+#   needs no declaration here. Only the app's private key is a secret, and
+#   a secret is not auto-inherited by a called workflow unless the caller
+#   passes it or uses "secrets: inherit". It is still declared below even
+#   though every caller is expected to use "secrets: inherit", so the
+#   contract this workflow needs is documented rather than implicit. Its
+#   name matches the organisation's own secret name exactly, so
+#   "secrets: inherit" populates it with no remapping.
+on:
+  workflow_call:
+    inputs:
+      runs-on-runner:
+        description: Runner label the Renovate run executes on.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      GH_APP_DEPENDENCIES_PRIVATE_KEY:
+        description: >-
+          Private key of the organisation's dependencies GitHub App
+          (ostendorf-cloud-dependencies), used to mint a token scoped to the
+          calling repository that Renovate runs with. Required: Renovate
+          cannot run at all without it.
+        required: true
+
+permissions:
+  contents: read
+
+# One Renovate run at a time for the calling repository. "github.workflow"
+# inside a called reusable workflow resolves to the CALLER's workflow name,
+# not this file's own "name:" above, because the called job runs as part of
+# the caller's run (confirmed against GitHub's own docs and community
+# guidance on reusable workflows). Concurrency groups are themselves scoped
+# to one repository, never shared across repositories, so two different
+# repositories each calling this workflow from a caller also named
+# "renovate" do not collide with each other; only runs within the same
+# repository share this group. That is exactly the old central workflow's
+# "group: ${{ github.workflow }}" intent, carried over unchanged: serialise
+# every trigger (schedule, manual dispatch, a rebase checkbox edit) for one
+# repository's own Renovate run, rather than letting them overlap.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Self-hosted Renovate
+    # This job-level "if:" is the single centralized copy of the anti-loop
+    # condition for every caller of this reusable workflow, instead of
+    # requiring each per-repository caller to reproduce it correctly. It
+    # lives here rather than in the caller because GitHub's own
+    # documentation on reusing workflow configurations states verbatim:
+    # "When a reusable workflow is triggered by a caller workflow, the
+    # github context is always associated with the caller workflow."
+    # That means "github.event_name", "github.event.sender.login",
+    # "github.event.issue.title", and "github.event.pull_request.user.login"
+    # all read the CALLER's own triggering event here, exactly as they would
+    # read in the caller's own workflow file (this is the same mechanism,
+    # just one level deeper, as "github.workflow" resolving to the caller's
+    # workflow name in the concurrency comment above). Centralizing the
+    # condition here means one copy of this safety-critical check instead
+    # of one per rollout repository, removing the copy-paste risk of each
+    # caller having to reproduce it on its own.
+    #
+    # What fires:
+    #   - every "schedule" tick on the caller;
+    #   - every manual "workflow_dispatch" on the caller;
+    #   - an "issues"/"pull_request" "edited" event on the caller, but only
+    #     when BOTH of:
+    #     (a) the issue is the Dependency Dashboard, or the pull request is
+    #         authored by the dependencies bot, AND
+    #     (b) the edit's sender is NOT the dependencies bot itself.
+    #
+    # What does NOT fire:
+    #   - Renovate's own edit of the Dependency Dashboard issue body or of
+    #     one of its own pull request bodies during a normal run. Every
+    #     such edit carries "github.event.sender.login" ==
+    #     "ostendorf-cloud-dependencies[bot]" (the dependencies bot is the
+    #     one making the edit), so condition (b) above excludes it. This is
+    #     the load-bearing anti-loop guard: without it, a caller would
+    #     retrigger this workflow on every one of its own runs that touches
+    #     either body, forever.
+    #   - any edit, by any actor, to an issue that is not the Dependency
+    #     Dashboard or a pull request not authored by the dependencies bot:
+    #     condition (a) excludes it.
+    #
+    # The Dependency Dashboard issue has no stable issue number to check
+    # ahead of time in a static workflow file, and Renovate assigns it no
+    # guaranteed label either, so this condition matches on
+    # "github.event.issue.title == 'Dependency Dashboard'" instead:
+    # Renovate's own documented default title for that issue
+    # (docs.renovatebot.com, "dependencyDashboard.title", default
+    # "Dependency Dashboard"). A caller repository that ever configures a
+    # custom dashboard title would need this condition updated to match;
+    # none of this organisation's repositories do yet.
+    #
+    # Property access on a context field that does not exist for the
+    # current event (for example "github.event.issue" on a "schedule" or
+    # "pull_request" event) evaluates to null rather than failing the
+    # expression, so each side of the "||"/"&&" below is safe to evaluate
+    # regardless of which event triggered the caller's run.
+    #
+    # The "pull_request" "edited" event that can satisfy this condition
+    # runs from the pull request's own merge-ref workflow files, not from
+    # the default branch; see renovate.yaml's header comment for why that
+    # is not fork-exploitable (bot authorship is still required above).
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.sender.login != 'ostendorf-cloud-dependencies[bot]' &&
+        (
+          github.event.issue.title == 'Dependency Dashboard' ||
+          github.event.pull_request.user.login == 'ostendorf-cloud-dependencies[bot]'
+        )
+      )
+    # A "workflow_call"-only trigger, like reusable-dco.yaml and
+    # reusable-renovate-config.yaml, so "inputs" is always populated by the
+    # caller and never null at runtime. Unlike the old workflow, which also
+    # declared "schedule" (an event with no "inputs" context at all) and
+    # needed "|| 'ubuntu-latest'" to avoid erroring on a null input, no
+    # fallback is needed here.
+    runs-on: ${{ inputs.runs-on-runner }}
+    # Renovate runs can take a while longer than this repository's usual
+    # lint checks, which finish in well under 10 minutes.
+    timeout-minutes: 30
+    steps:
+      # The upstream action's documented usage always checks out first. The
+      # repository's own renovate.json is not read from this checkout:
+      # Renovate reads each repository's config through the API, this one
+      # included.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Mint a dependencies app token scoped to this repository
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        with:
+          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
+          private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
+          # Deliberately no "owner" and no "repositories" input here.
+          # Leaving both unset scopes the minted token to only the
+          # repository this job is currently running in. The old, now
+          # retired central workflow set
+          # "owner: ${{ github.repository_owner }}" precisely to get the
+          # opposite, org-wide scope for its autodiscover run; this
+          # workflow is the per-repository model issue #28 moves to, so it
+          # must not do that.
+
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@266fef21329c44765ad42f9dea1f01f5d2d91084  # v46.3.13
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+        # Autodiscovery still drives which repositories this run processes,
+        # the same mechanism the old org-wide workflow used. The only
+        # change is the token's scope: it now sees exactly one repository,
+        # so autodiscovery finds exactly that one, see the header comment
+        # above for why this does not need "RENOVATE_REPOSITORIES" instead.
+        env:
+          RENOVATE_AUTODISCOVER: 'true'

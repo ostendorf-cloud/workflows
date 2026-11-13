@@ -1,68 +1,74 @@
 name: renovate
 
-# Runs self-hosted Renovate for the organisation, authenticated through the
-# ostendorf-cloud-dependencies GitHub App, on a daily schedule plus manual
-# dispatch.
+# Thin, per-repository trigger for this repository's own Renovate run.
+# Calls "reusable-renovate.yaml" (dogfooding: this is the first and, so
+# far, only caller), replacing the old central, org-wide autodiscover
+# workflow issue #28 retired. That old workflow ran one job against every
+# repository the ostendorf-cloud-dependencies GitHub App is installed on,
+# triggered only by "schedule"/"workflow_dispatch". This workflow instead
+# runs Renovate for just this repository, from this repository's own
+# triggers.
 #
-# Not a "workflow_call" workflow like the rest of this repository: Renovate
-# runs against whichever repositories the GitHub App is installed on, it is
-# not invoked by another repository's job.
+# The "issues"/"pull_request" "edited" triggers below exist so that a
+# human checking a Renovate rebase checkbox reacts within this run's CI
+# time, instead of waiting for the next "schedule" tick. Checking that
+# checkbox edits the Dependency Dashboard issue body (for a repository-wide
+# rebase) or a Renovate pull request's own body (for a single PR), which
+# GitHub reports as an "issues"/"pull_request" "edited" event. The old
+# org-wide workflow could never react to that edit at all: a single GitHub
+# App installation spanning many repositories has no way to subscribe to a
+# same-repository "issues"/"pull_request" event belonging to one specific
+# repository out of all of them, because the event is native to the
+# repository it happens in, not to the app installation. A per-repository
+# caller workflow like this one can, because the event now belongs to the
+# very repository the workflow file lives in.
 #
-# "runs-on-runner" is a "workflow_dispatch" input, not a bare
-# "runs-on: ubuntu-latest", so a manual run can target a different runner.
-# The "schedule" trigger carries no "workflow_dispatch" inputs context at
-# all ("inputs" is only ever populated by that event), so the job below
-# reads "runs-on: ${{ inputs.runs-on-runner || 'ubuntu-latest' }}" with the
-# "|| 'ubuntu-latest'" fallback, not just "${{ inputs.runs-on-runner }}", or
-# a scheduled run would error on a null input.
+# "pull_request: edited" (not "pull_request_target") resolves and runs this
+# workflow's own YAML from the pull request's merge ref, not from the
+# default branch. A pull request that modified these very workflow files
+# (for example bumping a pinned action digest) would run that modified
+# version, with the dependencies app's private key available through
+# "secrets: inherit", the moment its rebase checkbox is edited. This is NOT
+# fork-exploitable: the anti-loop "if:" (centralized in
+# "reusable-renovate.yaml", see that file's "renovate" job) still requires
+# the pull request be authored by "ostendorf-cloud-dependencies[bot]"
+# before anything runs, and an external fork cannot author a pull request
+# as that trusted, org-controlled bot.
 on:
+  # Unchanged from the retired workflow.
   schedule:
     - cron: "17 3 * * *"
+  # No inputs here: "runs-on-runner" now lives on "reusable-renovate.yaml"'s
+  # own "workflow_call" input instead, with its own default. Keeping this
+  # trigger input-free keeps the "with:" below simple; forwarding a runner
+  # choice through a "workflow_dispatch" input is possible but is not
+  # needed for this repository's own use.
   workflow_dispatch:
-    inputs:
-      runs-on-runner:
-        description: Runner label the Renovate run executes on.
-        type: string
-        default: ubuntu-latest
+  issues:
+    types: [edited]
+  pull_request:
+    types: [edited]
 
+# "contents: read" is enough for this caller: it only declares triggers and
+# calls "reusable-renovate.yaml" unconditionally, needing no permission of
+# its own, and the actual Renovate run's permissions come from the token
+# "reusable-renovate.yaml" mints for itself, not from this workflow's own
+# GITHUB_TOKEN.
 permissions:
   contents: read
 
-# One Renovate run at a time: a manual dispatch firing while the scheduled
-# run is still going must not overlap it.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 jobs:
   renovate:
-    runs-on: ${{ inputs.runs-on-runner || 'ubuntu-latest' }}
-    # Renovate runs can take a while longer than this repository's usual
-    # lint checks, which finish in well under 10 minutes.
-    timeout-minutes: 30
-    steps:
-      - name: Mint a dependencies app token
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
-        with:
-          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
-          private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
-          # Without "owner", the action scopes the token to only this
-          # calling repository, silently limiting the autodiscovery below
-          # to one repository instead of every one the app is installed on.
-          owner: ${{ github.repository_owner }}
-
-      # The upstream action's documented usage always checks out first. The
-      # repository's own renovate.json is not read from this checkout:
-      # Renovate reads each repository's config through the API, this one
-      # included.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Self-hosted Renovate
-        uses: renovatebot/github-action@266fef21329c44765ad42f9dea1f01f5d2d91084  # v46.3.13
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-        # Autodiscovery is what gives the run its target repositories,
-        # bounded by the GitHub App installation's scope.
-        env:
-          RENOVATE_AUTODISCOVER: 'true'
+    name: Call reusable-renovate
+    # Calls "reusable-renovate.yaml" unconditionally on every trigger above:
+    # every "schedule" tick, every manual "workflow_dispatch", and every
+    # "issues"/"pull_request" "edited" event, regardless of sender or of
+    # which issue or pull request was edited. The anti-loop decision that
+    # used to gate this job directly now lives inside
+    # "reusable-renovate.yaml" itself, as that reusable workflow's own
+    # job-level "if:", so there is one centralized copy of the condition
+    # instead of one per calling repository. See that file's "renovate"
+    # job for the actual condition and the reasoning behind moving it
+    # there.
+    uses: ./.github/workflows/reusable-renovate.yaml
+    secrets: inherit
