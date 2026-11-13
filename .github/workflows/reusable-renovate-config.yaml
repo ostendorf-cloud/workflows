@@ -37,19 +37,38 @@ name: reusable-renovate-config
 # "--platform=local" alone is not enough: without
 # "--config-validation-error" the identical ":pinDigests" run logs the
 # same error but exits 0 at the shell level, so the flag is required or
-# this step would silently always pass. A preset reference that names a
-# real, remote source is resolved too, not only bundled ones: confirmed
-# empirically with a "github>" preset pointing at a deliberately
-# nonexistent organisation and repository, which made a real,
-# unauthenticated HTTPS request to the GitHub contents API
+# this step would silently always pass. A preset reference addressed
+# through a platform-hosted shorthand such as "github>org/repo" is
+# resolved too, not only bundled ones: confirmed empirically with a
+# "github>" preset pointing at a deliberately nonexistent organisation
+# and repository, which made a real, unauthenticated HTTPS request to
+# the GitHub contents API
 # ("GET https://api.github.com/repos/.../contents/default.json", 404 Not
 # Found, about 220ms per request) and then failed the same way, with
 # exit code 1, in under two seconds total. GitHub's contents API serves
 # public repository content to unauthenticated requests, which is why no
 # token was needed for that request to resolve for real instead of
-# hanging or silently skipping.
+# hanging or silently skipping. Not every platform-hosted shorthand
+# resolves this way, though: see "local>" just below.
 #
-# What this does NOT catch: a preset hosted in a private, credential-
+# What this does NOT catch: a preset addressed with "local>org/repo",
+# Renovate's own shorthand for a preset hosted in the org/repo running
+# the current job, even when that repository is public and the preset
+# itself is perfectly valid. "--platform=local" makes "local" itself the
+# platform a preset resolves against, and Renovate has no local-preset
+# implementation for that platform, full stop: confirmed empirically
+# against "local>ostendorf-cloud/workflows", a real, public repository
+# with a real "renovate.json", which fails with "Preset caused
+# unexpected error (local>ostendorf-cloud/workflows)" and, at
+# LOG_LEVEL=debug, the actual cause, "The platform you're using (local)
+# does not support local presets." This is structural to
+# "--platform=local" itself, unlike the private, credential-gated case
+# below: no token, for a public or a private repository, would change
+# it. A caller whose config addresses this organisation's own shared
+# preset with "local>org/repo" should use "github>org/repo" instead,
+# which resolves through the path this step actually supports.
+#
+# Also not caught: a preset hosted in a private, credential-
 # gated remote source. The same unauthenticated GitHub contents API
 # request described above returns the same 404 Not Found for a private
 # repository it cannot read as it does for one that genuinely does not

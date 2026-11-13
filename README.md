@@ -29,8 +29,11 @@ Available and planned workflows:
   `renovate.json` does not parse, carries an unknown or wrongly typed option, or, with its
   `strict` input enabled, needs a migration. Also fails on a nonexistent preset named in
   `extends`, bundled/shorthand presets included, by actually resolving it with a local,
-  credential-free Renovate run. A preset hosted in a private, credential-gated remote source
-  is out of scope: it fails the same way as a nonexistent one, since this workflow accepts no
+  credential-free Renovate run. Two kinds of preset are out of scope, for different reasons:
+  a preset addressed with `local>org/repo` fails even when it is public and valid, because
+  `--platform=local` has no local-preset implementation at all, not because of a missing
+  credential (use `github>org/repo` instead); a preset hosted in a private, credential-gated
+  remote source fails the same way as a nonexistent one, since this workflow accepts no
   platform token.
 
   ```yaml
