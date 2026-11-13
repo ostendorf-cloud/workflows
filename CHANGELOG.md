@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.2](https://github.com/ostendorf-cloud/workflows/compare/v0.2.1...v0.2.2) (2026-11-13)
+
+### Bug Fixes
+
+- **renovate:** move concurrency to job level ([#35](https://github.com/ostendorf-cloud/workflows/pull/35))
+
 ## [v0.2.1](https://github.com/ostendorf-cloud/workflows/compare/v0.2.0...v0.2.1) (2026-11-13)
 
 ### Bug Fixes
