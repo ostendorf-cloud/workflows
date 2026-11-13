@@ -47,6 +47,10 @@ jobs:
         with:
           app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
           private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
+          # Without "owner", the action scopes the token to only this
+          # calling repository, silently limiting the autodiscovery below
+          # to one repository instead of every one the app is installed on.
+          owner: ${{ github.repository_owner }}
 
       # The upstream action's documented usage always checks out first. The
       # repository's own renovate.json is not read from this checkout:
