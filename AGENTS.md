@@ -8,6 +8,9 @@ rules apply and are not repeated here.
 - `.github/workflows/<name>.yaml`: one reusable workflow per file, each independently callable
   through `workflow_call`. A consuming repository references one as
   `uses: ostendorf-cloud/workflows/.github/workflows/<name>.yaml@<tag>`.
+- `default.json`: a published Renovate preset for every repository in this organisation, pinned
+  by the same kind of tag as a reusable workflow. It is not this repository's own Renovate
+  configuration; that stays in `renovate.json`.
 - No application code, no Go module, no `package.json`: this repository IS workflow YAML, plus a
   couple of shell scripts under `scripts/` for its own CI glue, such as the DCO check.
 

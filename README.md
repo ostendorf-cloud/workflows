@@ -72,6 +72,35 @@ Available and planned workflows:
 - CodeQL scanning: planned, tracked by its own issue.
 - License-header check: planned, tracked by its own issue.
 
+## Renovate preset
+
+`default.json`, at the repository root, is a shared Renovate preset for every repository in this
+organisation, not this repository's own configuration (that stays in `renovate.json`). A consuming
+repository extends it pinned to a released tag, the same way it pins a reusable workflow:
+
+```json
+{
+  "extends": ["github>ostendorf-cloud/workflows#<tag>"]
+}
+```
+
+Renovate's `renovate-config-presets` manager treats a pinned preset tag as a dependency like any
+other, so Renovate itself opens a pull request to bump that tag whenever a new one is released.
+Pinning the preset costs no manual maintenance beyond merging that pull request.
+
+The preset carries what is genuinely organisation-wide, so a repository's own `renovate.json`
+only needs to hold what is actually specific to it:
+
+- `config:recommended`, `:semanticCommits` and `:gitSignOff`. `dependencyDashboard` is not
+  restated, since `config:recommended` already extends `:dependencyDashboard`.
+- `pinDigests`.
+- the `dependencies` label.
+- a `packageRules` entry that raises `minimumReleaseAge` to two days for the npm manager. pnpm 12
+  defaults its own `minimumReleaseAge` to 1440 minutes (one day) and refuses a younger lockfile
+  entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
+  pull request the moment a release appeared and every job downstream of the dependency update
+  failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
+
 ## Development
 
 ```sh
