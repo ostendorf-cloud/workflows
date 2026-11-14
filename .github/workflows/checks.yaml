@@ -1,78 +1,40 @@
 name: checks
 
+# "ready_for_review" is on top of the three default pull_request types
+# (opened, synchronize, reopened), not instead of them: specifying
+# "types:" at all replaces the default list rather than adding to it.
+# Without it, this workflow would never run again once a draft pull
+# request against this very repository is marked ready, the same gap
+# "reusable-checks.yaml" documents for every other caller.
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
-# One run per ref. A superseded push to a pull request cancels the run it
-# replaced; a push to main keeps every run, so the default branch has an
-# unbroken check record.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  actionlint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:actions
-
-  yamllint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:yaml
-
-  markdownlint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:markdown
-
-  gitleaks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:secrets
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:shell
-
-  license:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task lint:license
-
-  shell-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
-      - run: task test:shell
+  # Dogfooding: runs this repository's own checks through the same
+  # reusable workflow it publishes for every other repository to call,
+  # the same local "uses:" self-call "dco.yaml" and "renovate.yaml"
+  # already use for "reusable-dco.yaml" and "reusable-renovate.yaml".
+  # Concurrency, draft gating and path filtering all now live in
+  # "reusable-checks.yaml" itself, not here.
+  checks:
+    uses: ./.github/workflows/reusable-checks.yaml
+    with:
+      checks: |
+        [
+          {"task": "lint:actions", "paths": [".github/workflows/*"]},
+          {"task": "lint:yaml", "paths": ["*.yaml", "*.yml"]},
+          {"task": "lint:markdown", "paths": ["*.md", ".markdownlint-cli2.jsonc"]},
+          {"task": "lint:secrets"},
+          {"task": "lint:shell", "paths": ["scripts/*"]},
+          {"task": "lint:license", "paths": ["scripts/*"]},
+          {"task": "test:shell", "paths": ["scripts/*"]}
+        ]
 
   # Dogfooding: validates this repository's own renovate.json with the
   # same reusable workflow it publishes for every other repository to

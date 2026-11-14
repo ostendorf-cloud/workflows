@@ -1,0 +1,221 @@
+name: reusable-checks
+
+# Runs a caller's own lint/test targets as a matrix, one job per check, with
+# the concurrency, draft gating and path filtering every "checks.yaml" in
+# this organisation used to copy-paste for itself. Measured on 2026-11-14: a
+# 21-job checks run takes 45 seconds of wall clock but bills 21 minutes,
+# because GitHub and Blacksmith both round each job up to a full minute, and
+# 13 of 15 repositories had no "cancel-in-progress" at all. Supplies no
+# trigger of its own, called from a caller's own "push" and "pull_request"
+# triggers like reusable-dco.yaml. A caller's "pull_request" trigger must
+# list "ready_for_review" in its "types", on top of what it already has, or
+# the suite never runs again once a draft pull request is marked ready.
+#
+# Inputs:
+#   checks: JSON array of objects, one per check, for example
+#     '[{"task":"lint:actions"},{"task":"lint:shell","paths":["scripts/**"]}]'.
+#     "task" is a Taskfile target and also becomes the job's own name, so a
+#     failing job names the check that failed. "paths" and "paths-ignore"
+#     are each an optional array of glob patterns; neither is required, and
+#     a check with no filter always runs. A JSON string, not a structured
+#     "workflow_call" type, because those only support "string", "number"
+#     and "boolean"; reusable-codeql.yaml's "languages" input already takes
+#     a JSON array the same way.
+#
+#   runs-on: runner label every job below runs on, default ubuntu-latest.
+#     Named "runs-on" rather than this repository's usual "runs-on-runner",
+#     because nine repositories are moving from a paid Blacksmith runner to
+#     ubuntu-latest as they go public, which is this workflow's own reason
+#     to exist.
+#
+# Concurrency uses "github.workflow"/"github.ref", confirmed (not assumed)
+# to always be the CALLER's own values inside a called workflow ("the
+# github context is always associated with the caller workflow", Reusing
+# workflow configurations), so this group is already scoped per caller
+# workflow and ref. A workflow-level "concurrency:" block like this one
+# does take effect inside a called workflow: not spelled out in GitHub's
+# own docs, but it is the documented fix, in GitHub Community discussion
+# #30708, for the opposite mistake of keying concurrency on
+# "github.workflow" on both the caller's job and this workflow, which
+# cancels the caller instead; "checks.yaml" sets no concurrency of its
+# own, so that mistake cannot happen here.
+#
+# Draft gating skips both jobs below while the pull request is a draft. A
+# skipped job reports "success", one of the documented "successful check
+# statuses" for a required status check, so this never blocks merging; it
+# just has not run yet.
+#
+# Path filtering cannot live in the caller's own trigger: GitHub's docs
+# warn that a run skipped by "on: paths:" leaves its required checks
+# "Pending" forever. "detect" below runs unconditionally, diffs a pull
+# request against the merge base of its base branch (or a push against
+# "github.event.before"), and falls back to treating every file as
+# changed on a branch's first push or an unreachable previous tip (a
+# force push). Each matrix cell then decides for itself whether to run
+# its own task, matching "*" against a changed file the way bash's "case"
+# does. "*" spans "/" too, so "*.md" already covers a nested file and is
+# the pattern to write. "**/*.md" is the trap: "**" is only a second "*",
+# so that pattern needs a literal "/" and silently misses a file at the
+# repository root. See README.md for a worked example.
+on:
+  workflow_call:
+    inputs:
+      checks:
+        description: >-
+          JSON array of {"task", "paths", "paths-ignore"} objects, one per check. "task" is
+          required; "paths" and "paths-ignore" are each an optional array of glob patterns.
+        type: string
+        required: true
+      runs-on:
+        description: Runner label every job in this workflow runs on.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  detect:
+    name: Detect changed files
+    runs-on: ${{ inputs.runs-on }}
+    if: github.event.pull_request.draft != true
+    timeout-minutes: 10
+    outputs:
+      all-changed: ${{ steps.diff.outputs.all }}
+      changed-files: ${{ steps.diff.outputs.files }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # See the header comment above for why a pull request is diffed
+      # against its merge base rather than the base branch's tip, and for
+      # the two cases that fall back to "all" instead of diffing.
+      - name: List changed files
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          all="false"
+          files=""
+
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            base="$(git merge-base "${BASE_SHA}" "${HEAD_SHA}")"
+            files="$(git diff --name-only "${base}" "${HEAD_SHA}")"
+          elif [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ] ||
+            ! git cat-file -e "${BEFORE_SHA}" 2>/dev/null; then
+            all="true"
+          else
+            files="$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}")"
+          fi
+
+          echo "all=${all}" >>"${GITHUB_OUTPUT}"
+          {
+            echo "files<<CHANGED_FILES_EOF"
+            printf '%s\n' "${files}"
+            echo "CHANGED_FILES_EOF"
+          } >>"${GITHUB_OUTPUT}"
+
+  check:
+    name: ${{ matrix.check.task }}
+    needs: detect
+    if: github.event.pull_request.draft != true
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(inputs.checks) }}
+    steps:
+      # Full history, not a shallow clone, the same way the old
+      # "checks.yaml" only checked out for its own gitleaks job: a check
+      # that scans commit history, not only the working tree, needs it,
+      # and one shared checkout step is simpler than a second per-check
+      # input just to toggle it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785  # v5.2.8
+
+      # A check whose "paths"/"paths-ignore" filter matches no changed
+      # file skips "task" but still exits 0, so a required status check
+      # tied to this job reports success instead of staying pending.
+      #
+      # Patterns travel as "toJSON(...)" rather than a joined string:
+      # GitHub Actions expression string literals document no escape
+      # sequence besides "''" for a literal quote, so a joined "\n"
+      # separator is not confirmed to produce an actual newline, only a
+      # backslash followed by "n". "jq" decodes the JSON array instead,
+      # which carries no such ambiguity. It comes from the runner image,
+      # where GitHub's hosted Ubuntu images preinstall it, and not from
+      # this repository: the checkout above is the CALLER's repository,
+      # so the mise step installs the caller's toolchain, not ours. A
+      # runner image without "jq" is what the guard below catches, and
+      # README.md states the requirement for a caller choosing its own
+      # "runs-on".
+      - name: Run ${{ matrix.check.task }}
+        env:
+          TASK: ${{ matrix.check.task }}
+          ALL_CHANGED: ${{ needs.detect.outputs.all-changed }}
+          CHANGED_FILES: ${{ needs.detect.outputs.changed-files }}
+          PATHS_JSON: ${{ toJSON(matrix.check.paths || fromJSON('[]')) }}
+          PATHS_IGNORE_JSON: ${{ toJSON(matrix.check['paths-ignore'] || fromJSON('[]')) }}
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required but is not installed" >&2
+            exit 1
+          fi
+
+          paths_count="$(jq 'length' <<<"${PATHS_JSON}")"
+          paths_ignore_count="$(jq 'length' <<<"${PATHS_IGNORE_JSON}")"
+          run="false"
+
+          if [ "${ALL_CHANGED}" = "true" ]; then
+            run="true"
+          elif [ "${paths_count}" -eq 0 ] && [ "${paths_ignore_count}" -eq 0 ]; then
+            run="true"
+          else
+            while IFS= read -r file; do
+              [ -z "${file}" ] && continue
+
+              included="true"
+              if [ "${paths_count}" -gt 0 ]; then
+                included="false"
+                while IFS= read -r pattern; do
+                  # Unquoted on purpose: a quoted pattern would match the
+                  # file literally instead of as a glob.
+                  # shellcheck disable=SC2254
+                  case "${file}" in
+                  ${pattern}) included="true" ;;
+                  esac
+                done < <(jq -r '.[]' <<<"${PATHS_JSON}")
+              fi
+
+              if [ "${included}" = "true" ] && [ "${paths_ignore_count}" -gt 0 ]; then
+                while IFS= read -r pattern; do
+                  # shellcheck disable=SC2254
+                  case "${file}" in
+                  ${pattern}) included="false" ;;
+                  esac
+                done < <(jq -r '.[]' <<<"${PATHS_IGNORE_JSON}")
+              fi
+
+              if [ "${included}" = "true" ]; then
+                run="true"
+                break
+              fi
+            done <<<"${CHANGED_FILES}"
+          fi
+
+          if [ "${run}" = "true" ]; then
+            task "${TASK}"
+          else
+            echo "skipping ${TASK}: no changed file matches its path filter"
+          fi

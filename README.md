@@ -42,6 +42,55 @@ Available and planned workflows:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate-config.yaml@v0.2.0
   ```
 
+- Checks (`reusable-checks.yaml`): runs a caller's own lint and test targets as a matrix, one
+  job per check, with workflow-level concurrency, draft gating and path filtering built in
+  instead of copied into every caller's own `checks.yaml`. `checks` is a JSON array of
+  `{"task", "paths", "paths-ignore"}` objects: `task` is a `task` target and also becomes the
+  job's own name, so a failing job names the check that failed; `paths` and `paths-ignore` are
+  each an optional array of glob patterns, matched the way `case` matches: `*` spans any run of
+  characters, `/` included, so `*.md` already covers `docs/adr/0001-x.md`. Write `*.md`, never
+  `**/*.md`: `**` is accepted but is only a second `*`, so `**/*.md` demands a literal `/` and
+  silently fails to match a file at the repository root. A check with
+  neither key always runs; one with only `paths` runs when a changed file matches any of its
+  patterns; `paths-ignore` then excludes a file that would otherwise match. The concurrency
+  group cancels a superseded pull request run and never cancels a push to the default branch.
+  No job runs while the pull request is a draft: a caller's own `pull_request` trigger must
+  list `ready_for_review` in its `types`, on top of whichever types it already needs, or the
+  suite never runs again once a draft pull request is marked ready. A check whose path filter
+  matches nothing skips its own `task` call but still exits 0, so a required status check
+  reports success instead of staying pending, since a reusable workflow has no way to filter
+  its own trigger the way a caller's own `on: pull_request: paths:` would.
+
+  Path filtering decodes its pattern arrays with `jq`, which the runner image has to provide.
+  GitHub's hosted Ubuntu images preinstall it. A caller pointing `runs-on` at an image that
+  does not carry `jq` fails the check with a message naming it, rather than silently skipping
+  the filter. The caller's own `mise.toml` does not cover this: the checkout inside this
+  workflow is the caller's repository, so the mise step installs the caller's toolchain.
+
+  A `paths` or `paths-ignore` array can list more than one pattern; a file only needs to match
+  one of them. This repository's own `checks.yaml` calls this workflow with exactly that shape,
+  below. A pull request touching only `README.md` matches `*.md`, so `lint:markdown` runs, and
+  matches neither `*.yaml` nor `*.yml`, so `lint:yaml` is skipped. One touching
+  `.yamllint.yaml` matches `*.yaml` and runs `lint:yaml` instead.
+
+  ```yaml
+  on:
+    push:
+      branches: [main]
+    pull_request:
+      types: [opened, synchronize, reopened, ready_for_review]
+
+  jobs:
+    checks:
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-checks.yaml@v0.2.0
+      with:
+        checks: |
+          [
+            {"task": "lint:actions", "paths": [".github/workflows/*"]},
+            {"task": "lint:yaml", "paths": ["*.yaml", "*.yml"]}
+          ]
+  ```
+
 - Self-hosted Renovate (`reusable-renovate.yaml`): runs self-hosted Renovate for the calling
   repository, authenticated through the ostendorf-cloud-dependencies GitHub App with a token
   scoped to only that one repository, so autodiscovery finds exactly that repository and no
