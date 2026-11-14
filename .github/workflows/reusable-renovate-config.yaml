@@ -130,6 +130,36 @@ name: reusable-renovate-config
 #     error, matching the bug it was written to catch; a caller can opt
 #     into the stricter check once ready for it.
 #
+#   extra-files: newline- or space-separated list of additional config
+#     files to validate, appended as positional arguments to
+#     "renovate-config-validator" alongside whatever "--strict" above
+#     already adds, default empty so every existing caller is
+#     unaffected. Built for a config "renovate-config-validator" would
+#     otherwise never look at on its own, such as this repository's own
+#     "default.json" Renovate preset: the validator only ever scans its
+#     default locations ("renovate.json", ".renovaterc" and the rest),
+#     "default.json" is not one of them, and without this input such a
+#     preset would ship to every consumer completely unvalidated.
+#     "renovate-config-validator" behaves differently once it is given
+#     at least one explicit file: it validates only the files it was
+#     given instead of also scanning its default locations, so a caller
+#     who sets this input and also keeps a config at a default location
+#     must list that file here too, or it silently stops being checked;
+#     this repository's own "checks.yaml" does exactly that, passing
+#     both "renovate.json" and "default.json". A missing or malformed
+#     file named here still fails this step, the same as a missing or
+#     malformed file at a default location already did: confirmed
+#     empirically against a file that does not exist ("ERROR: File does
+#     not exist", exit code 1) and against invalid JSON5 ("WARN: File
+#     could not be parsed" next to the JSON5 syntax error, exit code 1
+#     regardless of that message's own severity level). Both are caught
+#     by this step's own exit code, the same "${code}" it already exits
+#     with; the existing "No files to perform configuration validation
+#     against" handling below needs no change either, since that
+#     warning only ever appears when zero files were found in total,
+#     which still cannot happen silently whether the files involved come
+#     from this input, from a default location, or from both.
+#
 # Installing renovate:
 #   renovate is installed through mise's own "npm:renovate" backend, the
 #   same shape reusable-license.yaml uses for "aqua:google/addlicense":
@@ -199,6 +229,13 @@ on:
           that still works but needs migrating also fails the job.
         type: boolean
         default: false
+      extra-files:
+        description: >-
+          Newline- or space-separated list of additional config files to validate,
+          such as a shared preset "renovate-config-validator" would not otherwise
+          find at any of its default locations. Empty by default.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -240,11 +277,15 @@ jobs:
       - name: Validate the Renovate configuration
         env:
           STRICT: ${{ inputs.strict }}
+          EXTRA_FILES: ${{ inputs.extra-files }}
         run: |
           args=()
           if [ "${STRICT}" = "true" ]; then
             args+=(--strict)
           fi
+
+          read -r -a extra_files <<<"${EXTRA_FILES}"
+          args+=("${extra_files[@]}")
 
           code=0
           output="$(renovate-config-validator "${args[@]}" 2>&1)" || code=$?

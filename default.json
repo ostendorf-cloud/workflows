@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Shared Renovate preset for every ostendorf-cloud repository: semantic commits, signed-off commits, pinned digests, the dependencies label, and a release-age floor for npm packages.",
+  "extends": ["config:recommended", ":semanticCommits", ":gitSignOff"],
+  "pinDigests": true,
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "minimumReleaseAge": "2 days"
+    }
+  ]
+}
