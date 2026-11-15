@@ -131,34 +131,43 @@ name: reusable-renovate-config
 #     into the stricter check once ready for it.
 #
 #   extra-files: newline- or space-separated list of additional config
-#     files to validate, appended as positional arguments to
-#     "renovate-config-validator" alongside whatever "--strict" above
-#     already adds, default empty so every existing caller is
-#     unaffected. Built for a config "renovate-config-validator" would
-#     otherwise never look at on its own, such as this repository's own
-#     "default.json" Renovate preset: the validator only ever scans its
-#     default locations ("renovate.json", ".renovaterc" and the rest),
-#     "default.json" is not one of them, and without this input such a
-#     preset would ship to every consumer completely unvalidated.
-#     "renovate-config-validator" behaves differently once it is given
-#     at least one explicit file: it validates only the files it was
-#     given instead of also scanning its default locations, so a caller
-#     who sets this input and also keeps a config at a default location
-#     must list that file here too, or it silently stops being checked;
-#     this repository's own "checks.yaml" does exactly that, passing
-#     both "renovate.json" and "default.json". A missing or malformed
-#     file named here still fails this step, the same as a missing or
-#     malformed file at a default location already did: confirmed
-#     empirically against a file that does not exist ("ERROR: File does
-#     not exist", exit code 1) and against invalid JSON5 ("WARN: File
-#     could not be parsed" next to the JSON5 syntax error, exit code 1
-#     regardless of that message's own severity level). Both are caught
-#     by this step's own exit code, the same "${code}" it already exits
-#     with; the existing "No files to perform configuration validation
-#     against" handling below needs no change either, since that
-#     warning only ever appears when zero files were found in total,
-#     which still cannot happen silently whether the files involved come
-#     from this input, from a default location, or from both.
+#     files to validate in a second, additional
+#     "renovate-config-validator" run, appended as positional arguments
+#     alongside whatever "--strict" above already adds, default empty so
+#     every existing caller is unaffected. Built for a config
+#     "renovate-config-validator" would otherwise never look at on its
+#     own, such as this repository's own "default.json" Renovate preset:
+#     the validator only ever scans its default locations
+#     ("renovate.json", ".renovaterc" and the rest), "default.json" is
+#     not one of them, and without this input such a preset would ship
+#     to every consumer completely unvalidated.
+#
+#     This input adds a run, it never replaces the bare, auto-discovery
+#     one: confirmed empirically against renovate 44.238.0,
+#     "renovate-config-validator" validates a file found through
+#     auto-discovery differently from the same file named as an explicit
+#     argument. Auto-discovery logs "Validating renovate.json" and
+#     rejects a global-only option such as "baseDir" or "redisUrl" with
+#     exit 1; the identical file named explicitly logs "Validating
+#     renovate.json as global config" and exits 0 on that same option.
+#     Naming a default-location file in this input would therefore
+#     weaken its check rather than preserve it, which is why the
+#     validate step below always runs the validator bare first, with no
+#     file arguments, regardless of this input: auto-discovery and its
+#     stricter check always happen, and a caller no longer needs to also
+#     list a default-location file here to keep it checked. A missing or
+#     malformed file named here still fails this step's second run, the
+#     same as a missing or malformed file at a default location already
+#     fails the first: confirmed empirically against a file that does
+#     not exist ("ERROR: File does not exist", exit code 1) and against
+#     invalid JSON5 ("WARN: File could not be parsed" next to the JSON5
+#     syntax error, exit code 1 regardless of that message's own
+#     severity level). A missing named file also logs the same "No files
+#     to perform configuration validation against" warning the bare run
+#     treats as a hard failure, confirmed empirically against
+#     "renovate-config-validator nope.json", but the second run never
+#     needs that treatment: a missing named file already fails it
+#     through "ERROR: File does not exist" and its own exit code.
 #
 # Installing renovate:
 #   renovate is installed through mise's own "npm:renovate" backend, the
@@ -231,9 +240,12 @@ on:
         default: false
       extra-files:
         description: >-
-          Newline- or space-separated list of additional config files to validate,
-          such as a shared preset "renovate-config-validator" would not otherwise
-          find at any of its default locations. Empty by default.
+          Newline- or space-separated list of additional config files to validate
+          in a second, additional run, such as a shared preset
+          "renovate-config-validator" would not otherwise find at any of its
+          default locations. This adds a run rather than replacing the
+          auto-discovery one, so naming a default-location file here does not
+          strengthen its check. Empty by default.
         type: string
         default: ""
 
@@ -272,8 +284,21 @@ jobs:
 
       # "renovate-config-validator" exits 0 and only warns when no config
       # file exists at any of its default locations, see the "What this
-      # catches" comment above, so that warning is treated as a failure
-      # here rather than trusting the validator's own exit code alone.
+      # catches" comment above, so the bare run below treats that
+      # warning as a failure rather than trusting the validator's own
+      # exit code alone. The same warning text also appears when a named
+      # file does not exist, confirmed empirically against
+      # "renovate-config-validator nope.json", which also logs "ERROR:
+      # File does not exist" and already exits 1 on its own, which is why
+      # the extra-files run further below never treats that text as a
+      # signal; see the "extra-files" input comment above for both.
+      #
+      # The bare run always happens first, with no file arguments,
+      # regardless of "extra-files": confirmed empirically against
+      # renovate 44.238.0, a file named explicitly is validated as global
+      # config and accepts an option auto-discovery would reject, so
+      # running the validator bare keeps auto-discovery's stricter check
+      # for every caller, including one that also sets "extra-files".
       - name: Validate the Renovate configuration
         env:
           STRICT: ${{ inputs.strict }}
@@ -283,9 +308,6 @@ jobs:
           if [ "${STRICT}" = "true" ]; then
             args+=(--strict)
           fi
-
-          read -r -a extra_files <<<"${EXTRA_FILES}"
-          args+=("${extra_files[@]}")
 
           code=0
           output="$(renovate-config-validator "${args[@]}" 2>&1)" || code=$?
@@ -298,7 +320,27 @@ jobs:
             exit 1
           fi
 
-          exit "${code}"
+          # "-d ''" reads the whole input instead of stopping at the first
+          # newline, so both the newline- and space-separated forms the
+          # "extra-files" input documents expand into every named file.
+          # The trailing "|| true" matters: with "-d ''" "read" returns
+          # non-zero at end of input even after a full, successful read,
+          # and this step runs under "bash -e".
+          read -r -d '' -a extra_files <<<"${EXTRA_FILES}" || true
+
+          if [ "${#extra_files[@]}" -eq 0 ]; then
+            exit "${code}"
+          fi
+
+          extra_code=0
+          extra_output="$(renovate-config-validator "${args[@]}" "${extra_files[@]}" 2>&1)" ||
+            extra_code=$?
+          printf '%s\n' "${extra_output}"
+
+          if [ "${code}" -ne 0 ]; then
+            exit "${code}"
+          fi
+          exit "${extra_code}"
 
       # The step above never resolves "extends" into the presets it
       # names, see the "What this catches" comment above. This step

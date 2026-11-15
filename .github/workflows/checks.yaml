@@ -83,15 +83,14 @@ jobs:
   # version bug in it reached four consumer repositories before this
   # repository's own CI caught anything.
   #
-  # "extra-files" also names "default.json", the shared Renovate preset
+  # "extra-files" names only "default.json", the shared Renovate preset
   # this repository publishes for every other repository to extend:
   # "renovate-config-validator" never scans for it on its own, so without
-  # this it would ship unvalidated. "renovate.json" has to be named here
-  # too, not left to auto-discovery, because "renovate-config-validator"
-  # stops scanning its default locations the moment it is given any
-  # explicit file argument; dropping it here would silently stop
-  # checking this repository's own configuration.
+  # this it would ship unvalidated. "renovate.json" is deliberately not
+  # named: the reusable workflow always runs the validator bare first, so
+  # auto-discovery checks it anyway, and through the stricter of the two
+  # forms.
   renovate-config:
     uses: ./.github/workflows/reusable-renovate-config.yaml
     with:
-      extra-files: "renovate.json default.json"
+      extra-files: default.json
