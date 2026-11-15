@@ -82,5 +82,15 @@ jobs:
   # "reusable-renovate-config.yaml" on itself, which is why a Node
   # version bug in it reached four consumer repositories before this
   # repository's own CI caught anything.
+  #
+  # "extra-files" names only "default.json", the shared Renovate preset
+  # this repository publishes for every other repository to extend:
+  # "renovate-config-validator" never scans for it on its own, so without
+  # this it would ship unvalidated. "renovate.json" is deliberately not
+  # named: the reusable workflow always runs the validator bare first, so
+  # auto-discovery checks it anyway, and through the stricter of the two
+  # forms.
   renovate-config:
     uses: ./.github/workflows/reusable-renovate-config.yaml
+    with:
+      extra-files: default.json
