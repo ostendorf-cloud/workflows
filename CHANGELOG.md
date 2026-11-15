@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.3.0](https://github.com/ostendorf-cloud/workflows/compare/v0.2.2...v0.3.0) (2026-11-15)
+
+### Features
+
+- **renovate:** publish a shared preset ([#40](https://github.com/ostendorf-cloud/workflows/pull/40))
+
 ## [v0.2.2](https://github.com/ostendorf-cloud/workflows/compare/v0.2.1...v0.2.2) (2026-11-13)
 
 ### Bug Fixes
