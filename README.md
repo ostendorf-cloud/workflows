@@ -84,9 +84,9 @@ repository extends it pinned to a released tag, the same way it pins a reusable 
 }
 ```
 
-Renovate's `renovate-config-presets` manager treats a pinned preset tag as a dependency like any
-other, so Renovate itself opens a pull request to bump that tag whenever a new one is released.
-Pinning the preset costs no manual maintenance beyond merging that pull request.
+Renovate's `renovate-config` manager treats a pinned preset tag as a dependency like any other,
+so Renovate itself opens a pull request to bump that tag whenever a new one is released. Pinning
+the preset costs no manual maintenance beyond merging that pull request.
 
 The preset carries what is genuinely organisation-wide, so a repository's own `renovate.json`
 only needs to hold what is actually specific to it:
