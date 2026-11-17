@@ -14,9 +14,25 @@ A consuming repository's own workflow calls one with `uses:`, pinned to a releas
 ```yaml
 jobs:
   dco:
-    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v0.1.1
+    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v0.3.0
     secrets: inherit
 ```
+
+The examples in this file pin an exact tag. The floating form `@v0` is the organisation's
+preferred pin, see [Versioning](#versioning). It appears with the next release.
+
+## Versioning
+
+- Every stable release moves the floating major tag. For the `0.x` line that tag is `v0`.
+- The organisation prefers `@v0`. A consumer then gets every release without a pull request.
+- `@v0` first appears with the next release after the change that enabled it. Until then, pin
+  an exact tag such as `@v0.3.0`.
+- An exact tag such as `@v0.3.0` stays available for a consumer that wants to pin.
+- A pre-release never moves `v0`.
+- Releases stay in the `0.x` line.
+- A breaking change bumps the minor version and carries an upgrade note in the release notes.
+- A breaking change reaches every consumer on `@v0` on its next run. The owner accepts this.
+- Third party actions stay pinned by commit digest, not by a floating tag.
 
 Each reusable workflow documents its own required `inputs` and `secrets` in a header comment
 above its `on:` block.
