@@ -193,7 +193,9 @@ name: reusable-renovate-config
 #     files the calling repository publishes for others to extend, such
 #     as this repository's own "default.json". Default empty, which
 #     skips the step entirely, so every existing caller is unaffected.
-#     A file must end in ".json", ".json5" or ".jsonc". See "Shared
+#     A file must end in ".json", ".json5" or ".jsonc". A path must not
+#     contain a space, the same limit as "extra-files". A value made only
+#     of whitespace fails the job, since it names no file. See "Shared
 #     presets" below for what the step does and why.
 #
 # Shared presets:
@@ -219,8 +221,19 @@ name: reusable-renovate-config
 #   extensions) and runs the same "renovate --platform=local
 #   --config-validation-error" there. The whole preset resolves as a
 #   repository config, exactly the checked out version, with the same
-#   token and no credential from the caller. The directory need not be
-#   a git repository. Confirmed empirically against renovate 44.238.0:
+#   token and no credential from the caller.
+#
+#   The directory must not be inside a git work tree. Below a work tree
+#   renovate ignores the untracked copy, falls into its dry-run
+#   onboarding flow and exits 0 without resolving anything: confirmed
+#   empirically with a misspelt preset, which then passed. On a GitHub
+#   hosted runner "RUNNER_TEMP" lies outside the checkout. A self hosted
+#   runner might not, and a future renovate might find its config
+#   differently, so the step also fails when renovate's output mentions
+#   onboarding. A run that does read the copy never logs that word at
+#   the default log level.
+#
+#   Confirmed empirically against renovate 44.238.0:
 #   a copy of "default.json" passes with exit code 0, the same copy with
 #   ":semanticCommitss" fails with "Cannot find preset's package
 #   (:semanticCommitss)" and exit code 1.
@@ -313,7 +326,8 @@ on:
           Newline- or space-separated list of shared preset files this repository
           publishes, such as "default.json". Each one is resolved on its own as
           if it were a repository's config, so a preset in its own "extends" that
-          does not exist fails the job. Empty by default.
+          does not exist fails the job. A path must not contain a space. Empty by
+          default.
         type: string
         default: ""
 
@@ -459,6 +473,13 @@ jobs:
           # Same splitting as "extra-files" above, see the comment there.
           read -r -d '' -a preset_files <<<"${PRESET_FILES}" || true
 
+          # A value made only of whitespace passes the "if:" above but
+          # names no file, so nothing would be checked.
+          if [ "${#preset_files[@]}" -eq 0 ]; then
+            echo "the preset-files input names no file" >&2
+            exit 1
+          fi
+
           failed=0
           for file in "${preset_files[@]}"; do
             if [ ! -f "${file}" ]; then
@@ -490,6 +511,15 @@ jobs:
 
             if [ "${code}" -ne 0 ]; then
               echo "preset file does not resolve: ${file} (exit code ${code})" >&2
+              failed=1
+            elif printf '%s\n' "${output}" | grep -qi onboarding; then
+              # Renovate did not read the copy and fell into its dry-run
+              # onboarding flow, which exits 0 without resolving anything.
+              # See "Shared presets" above.
+              echo "renovate did not read the copy of ${file} and ran" \
+                "onboarding instead, so nothing was resolved: the" \
+                "temporary directory ${dir} must not be inside a git" \
+                "work tree" >&2
               failed=1
             fi
           done

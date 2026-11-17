@@ -42,6 +42,13 @@ if [ ! -s "${work}/step.sh" ]; then
   exit 1
 fi
 
+# The same step's lines before its run block: its "if:" and "env:".
+awk '
+  /^      - name: Resolve the shared preset files$/ { in_step = 1; next }
+  in_step && /^        run: \|$/ { exit }
+  in_step { print }
+' "${workflow}" >"${work}/wiring"
+
 mkdir -p "${work}/bin"
 cat >"${work}/bin/renovate" <<'EOF'
 #!/usr/bin/env bash
@@ -55,6 +62,11 @@ cat ./* >>"${STUB_LOG}"
 if grep -q BAD ./*; then
   echo "stub: Cannot find preset's package"
   exit 1
+fi
+# What renovate prints when it does not read the config it was given.
+if grep -q ONBOARD ./*; then
+  echo "DRY-RUN: Would commit files to Onboarding branch"
+  exit 0
 fi
 echo "stub: ok"
 EOF
@@ -121,12 +133,38 @@ if [ "${REAL_RENOVATE:-}" = "1" ]; then
   run_case real-bad default.json
   expect "a misspelt preset fails" 1 "Cannot find preset's package (:semanticCommitss)"
 
+  # The same misspelt preset with the temporary directory inside a git
+  # work tree: renovate ignores the copy and runs onboarding.
+  cp "${work}/ws-real-bad/default.json" "$(ws real-onboard)/default.json"
+  mkdir -p "${work}/tmp-real-onboard"
+  git -C "${work}/tmp-real-onboard" init -q
+  run_case real-onboard default.json
+  expect "a copy renovate does not read fails" 1 "must not be inside a git work tree"
+
   if [ "${failures}" -ne 0 ]; then
     echo "${failures} test(s) failed"
     exit 1
   fi
   echo "all tests passed"
   exit 0
+fi
+
+# The step runs only when "preset-files" is set, reads its list from that
+# input and gets the workflow's own token for the preset lookup.
+wiring_ok=1
+for want in \
+  "        if: inputs.preset-files != ''" \
+  "          PRESET_FILES: \${{ inputs.preset-files }}" \
+  "          GITHUB_COM_TOKEN: \${{ github.token }}"; do
+  if ! grep -qxF -- "${want}" "${work}/wiring"; then
+    echo "FAIL the step is wired to its input and token: lacks '${want}'"
+    cat "${work}/wiring"
+    failures=$((failures + 1))
+    wiring_ok=0
+  fi
+done
+if [ "${wiring_ok}" = "1" ]; then
+  echo "PASS the step is wired to its input and token"
 fi
 
 # A resolving preset passes, runs in a directory of its own that holds
@@ -198,6 +236,20 @@ run_case yaml p.yaml
 expect "an unsupported extension fails" 1 "preset file is not .json, .json5 or .jsonc: p.yaml"
 if [ "$(calls yaml)" != "0" ]; then
   fail "an unsupported extension fails" "renovate ran"
+fi
+
+# Renovate that does not read the copy runs onboarding and exits 0. The
+# step must not take that for a pass.
+echo '{"extends": [":ONBOARD"]}' >"$(ws onboard)/default.json"
+run_case onboard default.json
+expect "an onboarding run fails" 1 "must not be inside a git work tree"
+
+# A value made only of whitespace names no file and fails.
+ws blank >/dev/null
+run_case blank $' \n\t '
+expect "a blank input fails" 1 "the preset-files input names no file"
+if [ "$(calls blank)" != "0" ]; then
+  fail "a blank input fails" "renovate ran"
 fi
 
 # A file in a subdirectory is found relative to the checkout.
