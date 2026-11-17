@@ -90,7 +90,12 @@ jobs:
   # named: the reusable workflow always runs the validator bare first, so
   # auto-discovery checks it anyway, and through the stricter of the two
   # forms.
+  #
+  # "preset-files" also names "default.json", so a preset in its own
+  # "extends" that does not exist fails here, against the version under
+  # review, instead of in every repository that extends it.
   renovate-config:
     uses: ./.github/workflows/reusable-renovate-config.yaml
     with:
       extra-files: default.json
+      preset-files: default.json

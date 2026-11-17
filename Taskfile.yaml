@@ -42,6 +42,7 @@ tasks:
     cmds:
       - scripts/check-dco_test.sh
       - scripts/reusable-license_test.sh
+      - scripts/reusable-renovate-config_test.sh
 
   check:
     desc: Every check, one after another

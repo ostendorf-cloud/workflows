@@ -189,6 +189,59 @@ name: reusable-renovate-config
 #     needs that treatment: a missing named file already fails it
 #     through "ERROR: File does not exist" and its own exit code.
 #
+#   preset-files: newline- or space-separated list of shared preset
+#     files the calling repository publishes for others to extend, such
+#     as this repository's own "default.json". Default empty, which
+#     skips the step entirely, so every existing caller is unaffected.
+#     A file must end in ".json", ".json5" or ".jsonc". A path must not
+#     contain a space, the same limit as "extra-files". A value made only
+#     of whitespace fails the job, since it names no file. See "Shared
+#     presets" below for what the step does and why.
+#
+# Shared presets:
+#   "extra-files" checks that every option in a preset is a real
+#   option, but "renovate-config-validator" never resolves "extends".
+#   The second step resolves "extends", but only for the caller's own
+#   config. So a typo such as ":semanticCommitss" inside a published
+#   preset's own "extends" passed both, and surfaced only in every
+#   repository that extends the preset.
+#
+#   Two obvious fixes do not work. Pointing the caller's config at its
+#   own preset through "local>org/repo" fails under "--platform=local"
+#   for any preset, see "What this does NOT catch" above. Pointing it
+#   at "github>org/repo#<tag>" resolves the tagged version, not the one
+#   under review. "github>org/repo#<sha>" does resolve a commit (the
+#   GitHub contents API takes the SHA as its "ref"), but only once the
+#   commit is pushed and readable through that API, which is unverified
+#   for a pull request from a fork.
+#
+#   The "preset-files" step therefore copies each named file out of the
+#   checkout into its own empty directory as that directory's
+#   "renovate.json" ("renovate.json5" or "renovate.jsonc" for those
+#   extensions) and runs the same "renovate --platform=local
+#   --config-validation-error" there. The whole preset resolves as a
+#   repository config, exactly the checked out version, with the same
+#   token and no credential from the caller.
+#
+#   The directory must not be inside a git work tree. Below a work tree
+#   renovate ignores the untracked copy, falls into its dry-run
+#   onboarding flow and exits 0 without resolving anything: confirmed
+#   empirically with a misspelt preset, which then passed. On a GitHub
+#   hosted runner "RUNNER_TEMP" lies outside the checkout. A self hosted
+#   runner might not, and a future renovate might find its config
+#   differently, so the step also fails when renovate's output mentions
+#   onboarding. A run that does read the copy never logs that word at
+#   the default log level.
+#
+#   Confirmed empirically against renovate 44.238.0:
+#   a copy of "default.json" passes with exit code 0, the same copy with
+#   ":semanticCommitss" fails with "Cannot find preset's package
+#   (:semanticCommitss)" and exit code 1.
+#
+#   Still not caught: a reference from the preset to another file of
+#   the same repository, such as "github>org/repo:other", resolves from
+#   the default branch, not from the version under review.
+#
 # Installing renovate:
 #   renovate is installed through mise's own "npm:renovate" backend, the
 #   same shape reusable-license.yaml uses for "aqua:google/addlicense":
@@ -266,6 +319,15 @@ on:
           default locations. This adds a run rather than replacing the
           auto-discovery one, so naming a default-location file here does not
           strengthen its check. Empty by default.
+        type: string
+        default: ""
+      preset-files:
+        description: >-
+          Newline- or space-separated list of shared preset files this repository
+          publishes, such as "default.json". Each one is resolved on its own as
+          if it were a repository's config, so a preset in its own "extends" that
+          does not exist fails the job. A path must not contain a space. Empty by
+          default.
         type: string
         default: ""
 
@@ -395,3 +457,71 @@ jobs:
           output="$(renovate --platform=local --config-validation-error 2>&1)" || code=$?
           printf '%s\n' "${output}"
           exit "${code}"
+
+      # Resolves each shared preset file the way a consumer would, see
+      # "preset-files" above. Each file is copied into its own empty
+      # directory as that directory's "renovate.json" and the same
+      # command as above runs there. The copy comes from the checkout,
+      # so the version under review is resolved, never the default
+      # branch or a tag. Every file runs, and the step fails if any did.
+      - name: Resolve the shared preset files
+        if: inputs.preset-files != ''
+        env:
+          GITHUB_COM_TOKEN: ${{ github.token }}
+          PRESET_FILES: ${{ inputs.preset-files }}
+        run: |
+          # Same splitting as "extra-files" above, see the comment there.
+          read -r -d '' -a preset_files <<<"${PRESET_FILES}" || true
+
+          # A value made only of whitespace passes the "if:" above but
+          # names no file, so nothing would be checked.
+          if [ "${#preset_files[@]}" -eq 0 ]; then
+            echo "the preset-files input names no file" >&2
+            exit 1
+          fi
+
+          failed=0
+          for file in "${preset_files[@]}"; do
+            if [ ! -f "${file}" ]; then
+              echo "preset file does not exist: ${file}" >&2
+              failed=1
+              continue
+            fi
+
+            case "${file}" in
+              *.json5) name=renovate.json5 ;;
+              *.jsonc) name=renovate.jsonc ;;
+              *.json) name=renovate.json ;;
+              *)
+                echo "preset file is not .json, .json5 or .jsonc: ${file}" >&2
+                failed=1
+                continue
+                ;;
+            esac
+
+            dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/preset.XXXXXXXX")"
+            cp -- "${file}" "${dir}/${name}"
+
+            echo "resolving ${file} as ${name}"
+            code=0
+            output="$(cd "${dir}" &&
+              renovate --platform=local --config-validation-error 2>&1)" || code=$?
+            printf '%s\n' "${output}"
+            rm -rf -- "${dir}"
+
+            if [ "${code}" -ne 0 ]; then
+              echo "preset file does not resolve: ${file} (exit code ${code})" >&2
+              failed=1
+            elif printf '%s\n' "${output}" | grep -qi onboarding; then
+              # Renovate did not read the copy and fell into its dry-run
+              # onboarding flow, which exits 0 without resolving anything.
+              # See "Shared presets" above.
+              echo "renovate did not read the copy of ${file} and ran" \
+                "onboarding instead, so nothing was resolved: the" \
+                "temporary directory ${dir} must not be inside a git" \
+                "work tree" >&2
+              failed=1
+            fi
+          done
+
+          exit "${failed}"

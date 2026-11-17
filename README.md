@@ -69,6 +69,10 @@ Available and planned workflows:
   platform token from the caller. The lookup runs with the workflow's own read only
   `github.token` as `GITHUB_COM_TOKEN`, so the runner's shared API rate limit does not fail it.
   A caller sets no new input or secret.
+  - `extra-files`: validates more config files, such as a shared `default.json` preset, that
+    the validator would not find on its own.
+  - `preset-files`: resolves each named shared preset from the checkout, so a nonexistent
+    preset in its own `extends` fails the pull request that adds it.
 
   ```yaml
   jobs:
