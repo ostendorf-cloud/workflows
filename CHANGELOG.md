@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.4.0](https://github.com/ostendorf-cloud/workflows/compare/v0.3.0...v0.4.0) (2026-11-17)
+
+### Features
+
+- **license:** accept a header file through license-file ([#54](https://github.com/ostendorf-cloud/workflows/pull/54))
+- **release:** move a floating v0 tag on every stable release ([#53](https://github.com/ostendorf-cloud/workflows/pull/53))
+
+### Bug Fixes
+
+- **renovate-config:** resolve a shared preset's own extends in CI ([#55](https://github.com/ostendorf-cloud/workflows/pull/55))
+- **license:** fail closed on a failing find command or a bad path ([#52](https://github.com/ostendorf-cloud/workflows/pull/52))
+- **renovate-config:** pass github.token for preset lookups ([#49](https://github.com/ostendorf-cloud/workflows/pull/49))
+
 ## [v0.3.0](https://github.com/ostendorf-cloud/workflows/compare/v0.2.2...v0.3.0) (2026-11-15)
 
 ### Features
