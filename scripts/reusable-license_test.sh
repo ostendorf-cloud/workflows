@@ -38,6 +38,21 @@ mkdir -p "${work}/bin"
 cat >"${work}/bin/addlicense" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"${STUB_ARGS}"
+# Like addlicense 1.2.0: -f is read only without -s=only, and an unreadable
+# file then fails. With -s=only the file is ignored and the exit is 0.
+spdx=0
+file=""
+prev=""
+for a in "$@"; do
+  [ "${a}" = "--" ] && break
+  [ "${a}" = "-s=only" ] && spdx=1
+  [ "${prev}" = "-f" ] && file="${a}"
+  prev="${a}"
+done
+if [ "${spdx}" -eq 0 ] && [ -n "${file}" ] && [ ! -f "${file}" ]; then
+  echo "open ${file}: no such file" >&2
+  exit 1
+fi
 exit 0
 EOF
 chmod +x "${work}/bin/addlicense"
@@ -46,7 +61,9 @@ failures=0
 
 # run_case <name> <find-commands>: runs the step in a fresh workspace with
 # a few files, leaves the exit code in "code", the output in "out" and the
-# addlicense arguments, if any, in "${work}/args".
+# addlicense arguments, if any, in "${work}/args". The license inputs come
+# from the variables lt and lf, set per call: lt defaults to apache, lf to
+# empty.
 run_case() {
   local name="$1" commands="$2"
   local ws="${work}/ws-${name}"
@@ -54,11 +71,12 @@ run_case() {
   : >"${ws}/src/a.go"
   : >"${ws}/src/b.go"
   : >"${ws}/-dash.go"
+  echo "header" >"${ws}/header.txt"
   rm -f "${work}/args"
   code=0
   out="$(cd "${ws}" &&
     PATH="${work}/bin:${PATH}" STUB_ARGS="${work}/args" \
-      COPYRIGHT_HOLDER=Test YEAR=2026 LICENSE_TYPE=apache FIND_COMMANDS="${commands}" \
+      COPYRIGHT_HOLDER=Test YEAR=2026 LICENSE_TYPE="${lt-apache}" LICENSE_FILE="${lf-}" FIND_COMMANDS="${commands}" \
       bash -e "${work}/step.sh" 2>&1)" || code=$?
 }
 
@@ -189,6 +207,44 @@ expect "a command may create the files it prints" 0 "passing 1 file(s) to addlic
 # A command that reads stdin must not eat the remaining command lines.
 run_case stdin $'cat >/dev/null\nfind src -name a.go'
 expect "a command cannot consume the command list" 0 "passing 1 file(s) to addlicense"
+
+# The license template: a header file gives -f and no -l, a type gives -l
+# and no -f, neither keeps the former default apache, both or a missing
+# file fail before addlicense runs.
+# expect_args <name> <args>: the exact addlicense argument list, space joined.
+expect_args() {
+  local got
+  got="$(tr '\n' ' ' <"${work}/args")"
+  if [ "${got}" != "$2 " ]; then
+    echo "FAIL $1: arguments = '${got}', want '$2 '"
+    failures=$((failures + 1))
+  fi
+}
+
+# A header file gets no -s=only: addlicense 1.2.0 ignores -f with it.
+lt="" lf=header.txt run_case tfile $'find src -name a.go'
+expect "a header file is accepted" 0 "passing 1 file(s) to addlicense"
+expect_args "a header file is accepted" "-check -c Test -y 2026 -f header.txt -- src/a.go"
+
+lt=mit lf="" run_case ttype $'find src -name a.go'
+expect "a license type is accepted" 0 "passing 1 file(s) to addlicense"
+expect_args "a license type is accepted" "-check -c Test -y 2026 -l mit -s=only -- src/a.go"
+
+lt="" lf="" run_case tneither $'find src -name a.go'
+expect "neither input keeps apache" 0 "passing 1 file(s) to addlicense"
+expect_args "neither input keeps apache" "-check -c Test -y 2026 -l apache -s=only -- src/a.go"
+
+lt="" lf=dir.go run_case tdir $'find src -name a.go'
+expect "a directory as header file fails" 1 "license-file is not a regular file: dir.go"
+expect_not_called "a directory as header file fails"
+
+lt=apache lf=header.txt run_case tboth $'find src -name a.go'
+expect "both inputs fail" 1 "license-type and license-file are both set"
+expect_not_called "both inputs fail"
+
+lt="" lf=nothere.txt run_case tmissing $'find src -name a.go'
+expect "a missing header file fails" 1 "license-file is not a regular file: nothere.txt"
+expect_not_called "a missing header file fails"
 
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} test(s) failed"
