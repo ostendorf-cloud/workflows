@@ -30,7 +30,8 @@ name: reusable-renovate-config
 # write, which is why it needs no platform credential of its own to
 # actually resolve a preset reference, bundled/shorthand ones
 # included. It does get the workflow's own read only "github.token" as
-# "GITHUB_COM_TOKEN", for rate limits only: see "Token" below. Confirmed empirically: a config extending
+# "GITHUB_COM_TOKEN", for rate limits only: see "Token" below.
+# Confirmed empirically: a config extending
 # "config:recommended" and the nonexistent ":pinDigests" fails with
 # "Cannot find preset's package (:pinDigests)" and exit code 1, the same
 # config with only "config:recommended" passes with exit code 0, and
@@ -42,14 +43,16 @@ name: reusable-renovate-config
 # through a platform-hosted shorthand such as "github>org/repo" is
 # resolved too, not only bundled ones: confirmed empirically with a
 # "github>" preset pointing at a deliberately nonexistent organisation
-# and repository, which made a real, unauthenticated HTTPS request to
-# the GitHub contents API
+# and repository, which made a real HTTPS request to the GitHub
+# contents API
 # ("GET https://api.github.com/repos/.../contents/default.json", 404 Not
 # Found, about 220ms per request) and then failed the same way, with
-# exit code 1, in under two seconds total. GitHub's contents API serves
-# public repository content to unauthenticated requests, which is why no
-# token was needed for that request to resolve for real instead of
-# hanging or silently skipping. Not every platform-hosted shorthand
+# exit code 1, in under two seconds total. That run was made before the
+# workflow passed a token. GitHub's contents API serves public
+# repository content without one, which is why the request resolved for
+# real instead of hanging or silently skipping. With the token the same
+# request counts against the token's rate limit, not the runner
+# address's. Not every platform-hosted shorthand
 # resolves this way, though: see "local>" just below.
 #
 # What this does NOT catch: a preset addressed with "local>org/repo",
@@ -70,17 +73,19 @@ name: reusable-renovate-config
 # which resolves through the path this step actually supports.
 #
 # Also not caught: a preset hosted in a private, credential-
-# gated remote source. The same unauthenticated GitHub contents API
-# request described above returns the same 404 Not Found for a private
-# repository it cannot read as it does for one that genuinely does not
-# exist, so this step fails a caller's config that extends a real,
-# private preset exactly as if the name were a typo: "Cannot find
+# gated remote source. The same GitHub contents API request described
+# above returns the same 404 Not Found for a private repository the
+# token cannot read as it does for one that genuinely does not exist,
+# so this step fails a caller's config that extends a real, private
+# preset exactly as if the name were a typo: "Cannot find
 # preset's package", exit code 1. That failure is the same fail-closed
 # shape as every other case here, never a hang and never a silent pass,
 # but it is a real "not supported" case rather than a bug: this workflow
 # does not accept a platform token from the caller, deliberately: the
-# token it uses is its own "github.token", which only reads the calling
-# repository. A caller who genuinely needs a private, token-gated preset
+# token it uses is its own "github.token", which reads public
+# repositories and the calling repository, never a private one
+# elsewhere. A preset in the calling repository itself may now resolve
+# where it did not before, which is not tested. A caller who genuinely needs a private, token-gated preset
 # resolved is out of scope for now. Also still out of scope, unchanged
 # from before: the known, acknowledged gap upstream in
 # "renovate-config-validator" itself (for example
