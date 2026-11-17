@@ -147,20 +147,20 @@ Available and planned workflows:
 
 `default.json`, at the repository root, is a shared Renovate preset for every repository in this
 organisation, not this repository's own configuration (that stays in `renovate.json`). A consuming
-repository extends it pinned to a released tag, the same way it pins a reusable workflow:
+repository extends it at the floating tag, the same way it calls a reusable workflow:
 
 ```json
 {
-  "extends": ["github>ostendorf-cloud/workflows#<tag>"]
+  "extends": ["github>ostendorf-cloud/workflows#v0"]
 }
 ```
 
-Once `v0` exists, `github>ostendorf-cloud/workflows#v0` works as well. It is not verified how
-Renovate's `renovate-config` manager treats `#v0`. The first consumer migration will show it.
+`#v0` is the recommended form. An exact tag such as `#<tag>` works too, but Renovate then opens a
+pull request to the next exact tag, as it does for any other dependency.
 
-Renovate's `renovate-config` manager treats a pinned preset tag as a dependency like any other,
-so Renovate itself opens a pull request to bump that tag whenever a new one is released. Pinning
-the preset costs no manual maintenance beyond merging that pull request.
+Renovate's `renovate-config` manager treats the preset reference as a dependency like any
+other. The preset keeps the floating `#v0` as it is, see
+[First party references](#first-party-references).
 
 The preset carries what is genuinely organisation-wide, so a repository's own `renovate.json`
 only needs to hold what is actually specific to it:
@@ -168,14 +168,27 @@ only needs to hold what is actually specific to it:
 - `config:recommended`, `:semanticCommits` and `:gitSignOff`. `dependencyDashboard` is not
   restated, since `config:recommended` already extends `:dependencyDashboard`.
 - `pinDigests`, with a `packageRules` entry that turns it off for `ostendorf-cloud/workflows`.
-  The preset leaves first party workflow references unpinned on purpose: a digest pin would
-  rewrite `@v0` into `@<sha> # v0` and defeat the floating tag.
+  The preset leaves first party workflow references and its own preset reference unpinned on
+  purpose: a digest pin would rewrite `@v0` into `@<sha> # v0` and defeat the floating tag.
 - the `dependencies` label.
 - a `packageRules` entry that raises `minimumReleaseAge` to two days for the npm manager. pnpm 12
   defaults its own `minimumReleaseAge` to 1440 minutes (one day) and refuses a younger lockfile
   entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
   pull request the moment a release appeared and every job downstream of the dependency update
   failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
+
+### First party references
+
+One package rule covers both kinds of reference to this repository:
+
+- The `github-actions` manager finds the workflow references `@v0` in `.github/workflows`.
+- The `renovate-config` manager finds the preset reference `#v0` in the Renovate configuration.
+
+For both, the rule turns off `pinDigests` and sets the `github-actions` versioning. Without the
+rule, Renovate proposes a digest pin for `@v0`. It also reads `#v0` with `semver-coerced`
+versioning, proposes a bump to the newest exact tag and a digest pin. With the rule, `v0` counts
+as the newest `v0.x` tag, so neither reference gets an update. A new tag of this repository
+moves `v0`, and every consumer picks it up without a change.
 
 ## Development
 
