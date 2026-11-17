@@ -14,9 +14,41 @@ A consuming repository's own workflow calls one with `uses:`, pinned to a releas
 ```yaml
 jobs:
   dco:
-    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v0.1.1
+    uses: ostendorf-cloud/workflows/.github/workflows/reusable-dco.yaml@v0.3.0
     secrets: inherit
 ```
+
+The examples in this file pin an exact tag. The floating form `@v0` is the organisation's
+preferred pin, see [Versioning](#versioning). It appears with the next release.
+
+## Versioning
+
+- Every stable release moves the floating major tag. For the `0.x` line that tag is `v0`.
+- The organisation prefers `@v0`. A consumer then gets every release without a pull request.
+- `@v0` first appears with the next release after the change that enabled it. Until then, pin
+  an exact tag such as `@v0.3.0`.
+- An exact tag such as `@v0.3.0` stays available for a consumer that wants to pin.
+- A pre-release never moves `v0`.
+- Releases stay in the `0.x` line.
+- A breaking change bumps the minor version. `release-me` turns a breaking change below
+  `1.0.0` into a minor bump (`bump-minor-pre-major: true` in `release-me.yaml`).
+- A minor bump alone does not signal a breaking change, since a plain `feat` bumps the minor
+  version too.
+- A breaking change needs an upgrade note in the release notes. The maintainer writes it by hand
+  into a `release-me-notes` block on the release pull request. Nothing enforces it.
+- A breaking change reaches every consumer on `@v0` on its next run. The owner accepts this.
+- Third party actions stay pinned by commit digest, not by a floating tag.
+
+### Rollout
+
+1. Merge the change that enabled `major-tag`.
+2. Merge the release pull request that follows.
+3. Check that `v0` exists and points at the release commit.
+4. Each consumer switches its references to `@v0` and removes its `## Deviations` entry about
+   the missing tag, in the same change.
+
+A consumer with its own `pinDigests: true` in `renovate.json` must extend the preset or copy its
+rule for first party workflows, or Renovate pins `@v0` to a digest again.
 
 Each reusable workflow documents its own required `inputs` and `secrets` in a header comment
 above its `on:` block.
@@ -41,7 +73,7 @@ Available and planned workflows:
   ```yaml
   jobs:
     renovate-config:
-      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate-config.yaml@v0.2.0
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate-config.yaml@v0.3.0
   ```
 
 - Self-hosted Renovate (`reusable-renovate.yaml`): runs self-hosted Renovate for the calling
@@ -67,7 +99,7 @@ Available and planned workflows:
 
   jobs:
     renovate:
-      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@v0.2.0
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@v0.3.0
       secrets: inherit
   ```
 
@@ -108,6 +140,9 @@ repository extends it pinned to a released tag, the same way it pins a reusable 
 }
 ```
 
+Once `v0` exists, `github>ostendorf-cloud/workflows#v0` works as well. It is not verified how
+Renovate's `renovate-config` manager treats `#v0`. The first consumer migration will show it.
+
 Renovate's `renovate-config` manager treats a pinned preset tag as a dependency like any other,
 so Renovate itself opens a pull request to bump that tag whenever a new one is released. Pinning
 the preset costs no manual maintenance beyond merging that pull request.
@@ -117,7 +152,9 @@ only needs to hold what is actually specific to it:
 
 - `config:recommended`, `:semanticCommits` and `:gitSignOff`. `dependencyDashboard` is not
   restated, since `config:recommended` already extends `:dependencyDashboard`.
-- `pinDigests`.
+- `pinDigests`, with a `packageRules` entry that turns it off for `ostendorf-cloud/workflows`.
+  The preset leaves first party workflow references unpinned on purpose: a digest pin would
+  rewrite `@v0` into `@<sha> # v0` and defeat the floating tag.
 - the `dependencies` label.
 - a `packageRules` entry that raises `minimumReleaseAge` to two days for the npm manager. pnpm 12
   defaults its own `minimumReleaseAge` to 1440 minutes (one day) and refuses a younger lockfile

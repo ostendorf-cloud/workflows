@@ -6,6 +6,12 @@
   "labels": ["dependencies"],
   "packageRules": [
     {
+      "description": "First party workflow references stay on a floating tag such as v0, never a digest pin.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ostendorf-cloud/workflows"],
+      "pinDigests": false
+    },
+    {
       "matchManagers": ["npm"],
       "minimumReleaseAge": "2 days"
     }
