@@ -53,6 +53,7 @@ run_case() {
   mkdir -p "${ws}/src" "${ws}/dir.go"
   : >"${ws}/src/a.go"
   : >"${ws}/src/b.go"
+  : >"${ws}/-dash.go"
   rm -f "${work}/args"
   code=0
   out="$(cd "${ws}" &&
@@ -73,6 +74,23 @@ expect() {
     failures=$((failures + 1))
   else
     echo "PASS ${name}"
+  fi
+}
+
+expect_absent() {
+  local name="$1" text="$2"
+  if grep -qF -- "${text}" <<<"${out}"; then
+    echo "FAIL ${name}: output holds '${text}'"
+    echo "${out}"
+    failures=$((failures + 1))
+  fi
+}
+
+# expect_ws_file <name> <file>: the file exists in the case's workspace.
+expect_ws_file() {
+  if [ ! -e "${work}/ws-$1/$2" ]; then
+    echo "FAIL $1: $2 was not created, so its command did not run"
+    failures=$((failures + 1))
   fi
 }
 
@@ -98,6 +116,47 @@ expect "several commands are united" 0 "passing 2 file(s) to addlicense"
 run_case failing $'echo src/a.go; exit 3'
 expect "a failing command fails the job" 1 "find command failed with exit status 3"
 expect_not_called "a failing command fails the job"
+
+# The first failing command does not stop the later ones: both run, both
+# are reported, the job fails.
+run_case both $'touch ran1; exit 1\ntouch ran2; echo src/a.go'
+expect "a failing first command fails the job" 1 "at least one find command failed"
+expect_ws_file both ran1
+expect_ws_file both ran2
+expect_not_called "a failing first command fails the job"
+
+# A successful command after a failing one is not reported as failed: the
+# status is reset for every command.
+run_case reset $'exit 3\nfind src -name a.go'
+expect "a later success is not reported" 1 "find command failed with exit status 3: exit 3"
+if [ "$(grep -c "find command failed with exit status" <<<"${out}")" != "1" ]; then
+  echo "FAIL a later success is not reported: more than one command reported"
+  echo "${out}"
+  failures=$((failures + 1))
+fi
+
+# A failing command with a valid file list fails on the command, not on
+# the path check.
+run_case failmsg $'echo src/a.go; exit 3'
+expect "a failing command is named as such" 1 "at least one find command failed"
+expect_absent "a failing command is named as such" "not a regular file"
+
+# The real shape of the govue command: a loop whose own status is the
+# status of its last command, an echo. The mkdir fails because its parent
+# is a file, which holds as root too. Every printed path exists, so only
+# "set -e" can catch it.
+run_case loop $': >blocker; find src -name \'*.go\' | while read -r f; do mkdir -p blocker/x; cp "${f}" blocker/x/; echo "${f}"; done'
+expect "a failing step inside a loop fails the job" 1 "find command failed with exit status"
+expect_not_called "a failing step inside a loop fails the job"
+
+# A path starting with a dash reaches addlicense after "--".
+run_case dash $'printf \'%s\\n\' -dash.go'
+expect "a path starting with a dash is passed" 0 "passing 1 file(s) to addlicense"
+if [ "$(grep -nx -e '--' "${work}/args" | cut -d: -f1)" != "$(($(grep -nx -e '-dash.go' "${work}/args" | cut -d: -f1) - 1))" ]; then
+  echo "FAIL a path starting with a dash is passed: no -- right before -dash.go"
+  cat "${work}/args"
+  failures=$((failures + 1))
+fi
 
 run_case pipefail $'false | cat'
 expect "a failing pipeline stage fails the job" 1 "find command failed with exit status 1"
