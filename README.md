@@ -147,15 +147,16 @@ Available and planned workflows:
 
 `default.json`, at the repository root, is a shared Renovate preset for every repository in this
 organisation, not this repository's own configuration (that stays in `renovate.json`). A consuming
-repository extends it pinned to a released tag, the same way it pins a reusable workflow:
+repository extends it at the floating tag, the same way it calls a reusable workflow:
 
 ```json
 {
-  "extends": ["github>ostendorf-cloud/workflows#<tag>"]
+  "extends": ["github>ostendorf-cloud/workflows#v0"]
 }
 ```
 
-`github>ostendorf-cloud/workflows#v0` works as well and is the recommended form.
+`#v0` is the recommended form. An exact tag such as `#<tag>` works too, but Renovate then opens a
+pull request to the next exact tag, as it does for any other dependency.
 
 Renovate's `renovate-config` manager treats the preset reference as a dependency like any
 other. The preset keeps the floating `#v0` as it is, see
@@ -181,13 +182,13 @@ only needs to hold what is actually specific to it:
 One package rule covers both kinds of reference to this repository:
 
 - The `github-actions` manager finds the workflow references `@v0` in `.github/workflows`.
-- The `renovate-config` manager finds the preset reference `#v0` in `renovate.json`.
+- The `renovate-config` manager finds the preset reference `#v0` in the Renovate configuration.
 
 For both, the rule turns off `pinDigests` and sets the `github-actions` versioning. Without the
-rule, Renovate pins `@v0` to a digest. It also reads `#v0` with `semver-coerced` versioning,
-bumps it to the newest exact tag and pins it to a digest. With the rule, `v0` counts as the
-newest `v0.x` tag, so neither reference gets an update. A new tag of this repository moves `v0`,
-and every consumer picks it up without a change.
+rule, Renovate proposes a digest pin for `@v0`. It also reads `#v0` with `semver-coerced`
+versioning, proposes a bump to the newest exact tag and a digest pin. With the rule, `v0` counts
+as the newest `v0.x` tag, so neither reference gets an update. A new tag of this repository
+moves `v0`, and every consumer picks it up without a change.
 
 ## Development
 
