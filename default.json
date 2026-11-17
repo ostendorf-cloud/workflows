@@ -6,9 +6,10 @@
   "labels": ["dependencies"],
   "packageRules": [
     {
-      "description": "First party workflow references stay on a floating tag such as v0, never a digest pin.",
-      "matchManagers": ["github-actions"],
+      "description": "First party workflow references and the preset reference stay on a floating tag such as v0, never a digest pin and never a bump to an exact tag.",
+      "matchManagers": ["github-actions", "renovate-config"],
       "matchPackageNames": ["ostendorf-cloud/workflows"],
+      "versioning": "github-actions",
       "pinDigests": false
     },
     {
