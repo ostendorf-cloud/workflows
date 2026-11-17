@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.4.1](https://github.com/ostendorf-cloud/workflows/compare/v0.4.0...v0.4.1) (2026-11-17)
+
+### Bug Fixes
+
+- **renovate:** leave the preset reference unpinned ([#58](https://github.com/ostendorf-cloud/workflows/pull/58))
+
 ## [v0.4.0](https://github.com/ostendorf-cloud/workflows/compare/v0.3.0...v0.4.0) (2026-11-17)
 
 ### Features
