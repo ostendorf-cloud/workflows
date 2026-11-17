@@ -46,7 +46,9 @@ failures=0
 
 # run_case <name> <find-commands>: runs the step in a fresh workspace with
 # a few files, leaves the exit code in "code", the output in "out" and the
-# addlicense arguments, if any, in "${work}/args".
+# addlicense arguments, if any, in "${work}/args". The license inputs come
+# from the variables lt and lf, set per call: lt defaults to apache, lf to
+# empty.
 run_case() {
   local name="$1" commands="$2"
   local ws="${work}/ws-${name}"
@@ -54,11 +56,12 @@ run_case() {
   : >"${ws}/src/a.go"
   : >"${ws}/src/b.go"
   : >"${ws}/-dash.go"
+  echo "header" >"${ws}/header.txt"
   rm -f "${work}/args"
   code=0
   out="$(cd "${ws}" &&
     PATH="${work}/bin:${PATH}" STUB_ARGS="${work}/args" \
-      COPYRIGHT_HOLDER=Test YEAR=2026 LICENSE_TYPE=apache FIND_COMMANDS="${commands}" \
+      COPYRIGHT_HOLDER=Test YEAR=2026 LICENSE_TYPE="${lt-apache}" LICENSE_FILE="${lf-}" FIND_COMMANDS="${commands}" \
       bash -e "${work}/step.sh" 2>&1)" || code=$?
 }
 
@@ -189,6 +192,45 @@ expect "a command may create the files it prints" 0 "passing 1 file(s) to addlic
 # A command that reads stdin must not eat the remaining command lines.
 run_case stdin $'cat >/dev/null\nfind src -name a.go'
 expect "a command cannot consume the command list" 0 "passing 1 file(s) to addlicense"
+
+# The license template: a header file gives -f and no -l, a type gives -l
+# and no -f, neither keeps the former default apache, both or a missing
+# file fail before addlicense runs.
+arg_after() {
+  grep -x -A1 -e "$1" "${work}/args" | sed -n '2p'
+}
+
+lt="" lf=header.txt run_case tfile $'find src -name a.go'
+expect "a header file is accepted" 0 "passing 1 file(s) to addlicense"
+if [ "$(arg_after -f)" != "header.txt" ] || grep -qx -e '-l' "${work}/args"; then
+  echo "FAIL a header file is accepted: want -f header.txt and no -l"
+  cat "${work}/args"
+  failures=$((failures + 1))
+fi
+
+lt=mit lf="" run_case ttype $'find src -name a.go'
+expect "a license type is accepted" 0 "passing 1 file(s) to addlicense"
+if [ "$(arg_after -l)" != "mit" ] || grep -qx -e '-f' "${work}/args"; then
+  echo "FAIL a license type is accepted: want -l mit and no -f"
+  cat "${work}/args"
+  failures=$((failures + 1))
+fi
+
+lt="" lf="" run_case tneither $'find src -name a.go'
+expect "neither input keeps apache" 0 "passing 1 file(s) to addlicense"
+if [ "$(arg_after -l)" != "apache" ] || grep -qx -e '-f' "${work}/args"; then
+  echo "FAIL neither input keeps apache: want -l apache and no -f"
+  cat "${work}/args"
+  failures=$((failures + 1))
+fi
+
+lt=apache lf=header.txt run_case tboth $'find src -name a.go'
+expect "both inputs fail" 1 "license-type and license-file are both set"
+expect_not_called "both inputs fail"
+
+lt="" lf=nothere.txt run_case tmissing $'find src -name a.go'
+expect "a missing header file fails" 1 "license-file is not a regular file: nothere.txt"
+expect_not_called "a missing header file fails"
 
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} test(s) failed"

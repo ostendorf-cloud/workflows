@@ -20,10 +20,29 @@ name: reusable-license
 #     hardcoding one would force every consumer onto the same choice
 #     forever.
 #
-#   license-type: the license identifier passed to addlicense's "-l" flag,
-#     default "apache". A typed input because a future caller outside this
-#     organisation's own Apache-2.0 convention could need a different
-#     license.
+#   license-type: the license identifier passed to addlicense's "-l" flag.
+#     Optional. When neither license-type nor license-file is set, the job
+#     uses "apache". The default is applied inside the step and not in the
+#     input, because a default in the input would make an explicit
+#     license-type indistinguishable from none, and the job could not
+#     reject a caller that sets both. Mutually exclusive with license-file.
+#
+#   license-file: path to a license header template, relative to the
+#     repository root, passed to addlicense's "-f" flag. Optional, for a
+#     repository whose header is not one of addlicense's built-in
+#     templates. Mutually exclusive with license-type: setting both fails
+#     the job at once. A file that does not exist fails the job and is
+#     named. Use the same file the repository's own license lint target
+#     passes to addlicense, so CI and local check the same thing.
+#
+#   What "-check" verifies: only that a recognised license header is
+#   present in each file. It does not verify which license the header
+#   names. Measured with addlicense 1.2.0: a file carrying
+#   "SPDX-License-Identifier: Apache-2.0" checked against an Elastic-2.0
+#   header file exits 0, and a file with no header exits 1. Neither
+#   license-type nor license-file therefore guarantees that a header names
+#   the repository's license. Such a comparison is a different check and
+#   belongs in the calling repository.
 #
 #   copyright-holder: the name passed to addlicense's "-c" flag. Required,
 #     with no default: it varies per caller and a hardcoded default would
@@ -57,9 +76,17 @@ on:
         type: string
         default: ubuntu-latest
       license-type:
-        description: License identifier passed to addlicense's "-l" flag.
+        description: >-
+          License identifier passed to addlicense's "-l" flag. Defaults to apache when
+          license-file is not set either. Mutually exclusive with license-file.
         type: string
-        default: apache
+        default: ""
+      license-file:
+        description: >-
+          Path to a license header template passed to addlicense's "-f" flag. Mutually
+          exclusive with license-type.
+        type: string
+        default: ""
       copyright-holder:
         description: Copyright holder name passed to addlicense's "-c" flag.
         type: string
@@ -103,8 +130,25 @@ jobs:
           COPYRIGHT_HOLDER: ${{ inputs.copyright-holder }}
           YEAR: ${{ inputs.year }}
           LICENSE_TYPE: ${{ inputs.license-type }}
+          LICENSE_FILE: ${{ inputs.license-file }}
           FIND_COMMANDS: ${{ inputs.find-commands }}
         run: |
+          # The template is either a built-in one (-l) or a file (-f), never
+          # both. Neither set keeps the former default, apache.
+          if [ -n "${LICENSE_TYPE}" ] && [ -n "${LICENSE_FILE}" ]; then
+            echo "license-type and license-file are both set, they exclude each other: set only one of them" >&2
+            exit 1
+          fi
+          if [ -n "${LICENSE_FILE}" ]; then
+            if [ ! -f "${LICENSE_FILE}" ]; then
+              echo "license-file is not a regular file: ${LICENSE_FILE}" >&2
+              exit 1
+            fi
+            template=(-f "${LICENSE_FILE}")
+          else
+            template=(-l "${LICENSE_TYPE:-apache}")
+          fi
+
           # Fails closed. Each command's output and exit status are captured
           # on their own: a process substitution would drop the status, and
           # addlicense exits 0 on a path that does not exist. Each command
@@ -155,5 +199,5 @@ jobs:
           echo "passing ${#files[@]} file(s) to addlicense"
           printf '  %s\n' "${files[@]}"
 
-          addlicense -check -c "${COPYRIGHT_HOLDER}" -y "${YEAR}" -l "${LICENSE_TYPE}" \
+          addlicense -check -c "${COPYRIGHT_HOLDER}" -y "${YEAR}" "${template[@]}" \
             -s=only -- "${files[@]}"

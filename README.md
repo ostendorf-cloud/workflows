@@ -73,8 +73,16 @@ Available and planned workflows:
 
 - License-header check (`reusable-license.yaml`): runs `addlicense -check` over the files a
   caller selects and fails when one lacks a header. It never adds or rewrites a header.
-  - Inputs: `copyright-holder`, `year` and `find-commands` are required. `license-type`
-    (default `apache`), `addlicense-version` (default `1.2.0`) and `runs-on-runner` are optional.
+  - Inputs: `copyright-holder`, `year` and `find-commands` are required. `license-type`,
+    `license-file`, `addlicense-version` (default `1.2.0`) and `runs-on-runner` are optional.
+  - `license-type` is a built-in `addlicense` template, passed as `-l`. `license-file` is the
+    path of a header template file, passed as `-f`. They exclude each other: setting both fails
+    the job at once, and a `license-file` that does not exist fails and is named. Setting
+    neither uses `apache`, as before.
+  - `-check` verifies that a header is present, not which license it names. A file carrying
+    `SPDX-License-Identifier: Apache-2.0` passes against an Elastic-2.0 header file, and a file
+    without a header fails. Comparing a header with the repository's `LICENSE` is a separate
+    check that belongs in the calling repository.
   - `find-commands` is one or more complete shell commands, one per line. Each prints a
     newline-separated list of paths, and the union of all lists is checked.
   - The check fails closed. It fails when a command exits non zero, including a failing step
