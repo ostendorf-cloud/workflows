@@ -36,7 +36,13 @@ name: reusable-license
 #   find-commands: one or more complete shell "find" invocations, one per
 #     line. Each line's stdout is a newline-separated list of files; every
 #     file from every line is checked together. Required: there is no
-#     sensible default file set for an arbitrary repository.
+#     sensible default file set for an arbitrary repository. The job fails
+#     when a command exits non zero. Each command runs under "set -eo
+#     pipefail", so a failing stage of a pipeline counts and so does a
+#     failing step inside a loop, such as a "mkdir" or "cp" before the
+#     final "echo". The job also fails when a printed path is not a regular
+#     file after all commands have ended, so a command may create the files
+#     it prints. It logs how many files it passes to addlicense, and which.
 #
 #   addlicense-version: the version of addlicense mise installs, default
 #     "1.2.0". Pinned here, inside this reusable workflow, through an
@@ -99,19 +105,55 @@ jobs:
           LICENSE_TYPE: ${{ inputs.license-type }}
           FIND_COMMANDS: ${{ inputs.find-commands }}
         run: |
+          # Fails closed. Each command's output and exit status are captured
+          # on their own: a process substitution would drop the status, and
+          # addlicense exits 0 on a path that does not exist. Each command
+          # runs with -e and pipefail, because a loop's status is the status
+          # of its last command and would hide an earlier failure. The test
+          # scripts/reusable-license_test.sh runs this very block.
           files=()
+          failed=0
           while IFS= read -r cmd; do
             [ -z "${cmd}" ] && continue
+            status=0
+            out="$(bash -c "set -eo pipefail; ${cmd}" </dev/null)" || status=$?
+            if [ "${status}" -ne 0 ]; then
+              echo "find command failed with exit status ${status}: ${cmd}" >&2
+              failed=1
+              continue
+            fi
             while IFS= read -r file; do
               [ -z "${file}" ] && continue
               files+=("${file}")
-            done < <(bash -c "${cmd}")
+            done <<<"${out}"
           done <<<"${FIND_COMMANDS}"
+
+          if [ "${failed}" -ne 0 ]; then
+            echo "at least one find command failed, see above" >&2
+            exit 1
+          fi
+
+          # A listed path has to be a regular file after all commands have
+          # ended, so a command may create the files it prints.
+          for file in "${files[@]}"; do
+            if [ ! -f "${file}" ]; then
+              echo "not a regular file: ${file}" >&2
+              failed=1
+            fi
+          done
+
+          if [ "${failed}" -ne 0 ]; then
+            echo "at least one listed path is not a regular file, see above" >&2
+            exit 1
+          fi
 
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no files matched any of the configured find-commands" >&2
             exit 1
           fi
 
+          echo "passing ${#files[@]} file(s) to addlicense"
+          printf '  %s\n' "${files[@]}"
+
           addlicense -check -c "${COPYRIGHT_HOLDER}" -y "${YEAR}" -l "${LICENSE_TYPE}" \
-            -s=only "${files[@]}"
+            -s=only -- "${files[@]}"

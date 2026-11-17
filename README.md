@@ -71,8 +71,30 @@ Available and planned workflows:
       secrets: inherit
   ```
 
+- License-header check (`reusable-license.yaml`): runs `addlicense -check` over the files a
+  caller selects and fails when one lacks a header. It never adds or rewrites a header.
+  - Inputs: `copyright-holder`, `year` and `find-commands` are required. `license-type`
+    (default `apache`), `addlicense-version` (default `1.2.0`) and `runs-on-runner` are optional.
+  - `find-commands` is one or more complete shell commands, one per line. Each prints a
+    newline-separated list of paths, and the union of all lists is checked.
+  - The check fails closed. It fails when a command exits non zero, including a failing step
+    inside a loop or a pipeline. It fails and names every printed path that is not a regular
+    file after all commands have ended, so a command may create the files it prints. It fails
+    when no command prints a path.
+  - The log states how many files go to `addlicense` and lists them.
+
+  ```yaml
+  jobs:
+    license:
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-license.yaml@<tag>
+      with:
+        copyright-holder: Example Owner
+        year: "2026"
+        find-commands: |
+          find . -name '*.go' -not -path './vendor/*'
+  ```
+
 - CodeQL scanning: planned, tracked by its own issue.
-- License-header check: planned, tracked by its own issue.
 
 ## Renovate preset
 
