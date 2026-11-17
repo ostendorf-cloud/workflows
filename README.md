@@ -79,7 +79,10 @@ Available and planned workflows:
     path of a header template file, passed as `-f`. They exclude each other: setting both fails
     the job at once, and a `license-file` that does not exist fails and is named. Setting
     neither uses `apache`, as before.
-  - `-check` verifies that a header is present, not which license it names. A file carrying
+  - With `license-file` the job does not pass `-s=only`, because `addlicense` 1.2.0 ignores `-f`
+    when it is set. `addlicense` then reads the file and fails on one it cannot read.
+  - `-check` verifies that the word copyright or an SPDX identifier appears near the top of the
+    file, not which license it names and not the holder. A file carrying
     `SPDX-License-Identifier: Apache-2.0` passes against an Elastic-2.0 header file, and a file
     without a header fails. Comparing a header with the repository's `LICENSE` is a separate
     check that belongs in the calling repository.

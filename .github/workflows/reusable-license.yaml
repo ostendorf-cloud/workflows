@@ -35,9 +35,10 @@ name: reusable-license
 #     named. Use the same file the repository's own license lint target
 #     passes to addlicense, so CI and local check the same thing.
 #
-#   What "-check" verifies: only that a recognised license header is
-#   present in each file. It does not verify which license the header
-#   names. Measured with addlicense 1.2.0: a file carrying
+#   What "-check" verifies: only that the word "copyright" or an SPDX
+#   identifier appears near the top of each file (case insensitive, first
+#   1000 bytes). It verifies neither which license the header names nor
+#   the copyright holder. Measured with addlicense 1.2.0: a file carrying
 #   "SPDX-License-Identifier: Apache-2.0" checked against an Elastic-2.0
 #   header file exits 0, and a file with no header exits 1. Neither
 #   license-type nor license-file therefore guarantees that a header names
@@ -144,9 +145,12 @@ jobs:
               echo "license-file is not a regular file: ${LICENSE_FILE}" >&2
               exit 1
             fi
+            # No -s=only here: addlicense 1.2.0 ignores -f when -s=only is
+            # set and never reads the file. Without it, addlicense reads
+            # the file and fails on one it cannot read.
             template=(-f "${LICENSE_FILE}")
           else
-            template=(-l "${LICENSE_TYPE:-apache}")
+            template=(-l "${LICENSE_TYPE:-apache}" -s=only)
           fi
 
           # Fails closed. Each command's output and exit status are captured
@@ -200,4 +204,4 @@ jobs:
           printf '  %s\n' "${files[@]}"
 
           addlicense -check -c "${COPYRIGHT_HOLDER}" -y "${YEAR}" "${template[@]}" \
-            -s=only -- "${files[@]}"
+            -- "${files[@]}"

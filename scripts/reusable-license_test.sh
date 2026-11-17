@@ -38,6 +38,21 @@ mkdir -p "${work}/bin"
 cat >"${work}/bin/addlicense" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"${STUB_ARGS}"
+# Like addlicense 1.2.0: -f is read only without -s=only, and an unreadable
+# file then fails. With -s=only the file is ignored and the exit is 0.
+spdx=0
+file=""
+prev=""
+for a in "$@"; do
+  [ "${a}" = "--" ] && break
+  [ "${a}" = "-s=only" ] && spdx=1
+  [ "${prev}" = "-f" ] && file="${a}"
+  prev="${a}"
+done
+if [ "${spdx}" -eq 0 ] && [ -n "${file}" ] && [ ! -f "${file}" ]; then
+  echo "open ${file}: no such file" >&2
+  exit 1
+fi
 exit 0
 EOF
 chmod +x "${work}/bin/addlicense"
@@ -196,33 +211,32 @@ expect "a command cannot consume the command list" 0 "passing 1 file(s) to addli
 # The license template: a header file gives -f and no -l, a type gives -l
 # and no -f, neither keeps the former default apache, both or a missing
 # file fail before addlicense runs.
-arg_after() {
-  grep -x -A1 -e "$1" "${work}/args" | sed -n '2p'
+# expect_args <name> <args>: the exact addlicense argument list, space joined.
+expect_args() {
+  local got
+  got="$(tr '\n' ' ' <"${work}/args")"
+  if [ "${got}" != "$2 " ]; then
+    echo "FAIL $1: arguments = '${got}', want '$2 '"
+    failures=$((failures + 1))
+  fi
 }
 
+# A header file gets no -s=only: addlicense 1.2.0 ignores -f with it.
 lt="" lf=header.txt run_case tfile $'find src -name a.go'
 expect "a header file is accepted" 0 "passing 1 file(s) to addlicense"
-if [ "$(arg_after -f)" != "header.txt" ] || grep -qx -e '-l' "${work}/args"; then
-  echo "FAIL a header file is accepted: want -f header.txt and no -l"
-  cat "${work}/args"
-  failures=$((failures + 1))
-fi
+expect_args "a header file is accepted" "-check -c Test -y 2026 -f header.txt -- src/a.go"
 
 lt=mit lf="" run_case ttype $'find src -name a.go'
 expect "a license type is accepted" 0 "passing 1 file(s) to addlicense"
-if [ "$(arg_after -l)" != "mit" ] || grep -qx -e '-f' "${work}/args"; then
-  echo "FAIL a license type is accepted: want -l mit and no -f"
-  cat "${work}/args"
-  failures=$((failures + 1))
-fi
+expect_args "a license type is accepted" "-check -c Test -y 2026 -l mit -s=only -- src/a.go"
 
 lt="" lf="" run_case tneither $'find src -name a.go'
 expect "neither input keeps apache" 0 "passing 1 file(s) to addlicense"
-if [ "$(arg_after -l)" != "apache" ] || grep -qx -e '-f' "${work}/args"; then
-  echo "FAIL neither input keeps apache: want -l apache and no -f"
-  cat "${work}/args"
-  failures=$((failures + 1))
-fi
+expect_args "neither input keeps apache" "-check -c Test -y 2026 -l apache -s=only -- src/a.go"
+
+lt="" lf=dir.go run_case tdir $'find src -name a.go'
+expect "a directory as header file fails" 1 "license-file is not a regular file: dir.go"
+expect_not_called "a directory as header file fails"
 
 lt=apache lf=header.txt run_case tboth $'find src -name a.go'
 expect "both inputs fail" 1 "license-type and license-file are both set"
