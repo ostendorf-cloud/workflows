@@ -35,9 +35,9 @@ name: renovate
 # before anything runs, and an external fork cannot author a pull request
 # as that trusted, org-controlled bot.
 on:
-  # Unchanged from the retired workflow.
+  # Hourly. The minute is unchanged from the retired workflow.
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 * * * *"
   # No inputs here: "runs-on-runner" now lives on "reusable-renovate.yaml"'s
   # own "workflow_call" input instead, with its own default. Keeping this
   # trigger input-free keeps the "with:" below simple; forwarding a runner
