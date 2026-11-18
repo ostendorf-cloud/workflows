@@ -420,8 +420,18 @@ gh variable set RENOVATE_AUTO_MERGE_PATCH --repo ostendorf-cloud/<repository> --
   These do NOT veto: a top level `"automerge": false`, and a top level
   `"patch": { "automerge": false }`. The switch rules are package rules. Renovate applies package
   rules on top of top level options, and again after the config of the update type.
-- The change takes effect on the next Renovate run. A pull request that is already open picks it
-  up when Renovate next processes it.
+- The change takes effect on the next Renovate run, for Renovate's own merge.
+- It does not reach a pull request that Renovate already armed with GitHub's native auto-merge
+  (`platformAutomerge`, on by default). That pull request keeps GitHub's auto-merge and merges once
+  its required checks pass. Turning a switch off, or adding the veto rule, does not disarm it.
+  Disarm each one by hand, or close it:
+
+  ```sh
+  gh pr merge <number> --disable-auto
+  ```
+
+  Read from the code of renovate 44.238.0, not tested live: its GitHub platform has
+  `cancelPlatformAutomerge`, but no code under `workers` calls it.
 
 ### How it works
 
@@ -434,6 +444,13 @@ gh variable set RENOVATE_AUTO_MERGE_PATCH --repo ostendorf-cloud/<repository> --
 - `scripts/reusable-renovate-automerge_test.sh` runs that step for every combination of the two
   switches. With `REAL_RENOVATE=1` it also validates the rules with `renovate-config-validator
   --strict` and applies them through Renovate's own code to sample updates under `default.json`.
+- CI runs only the default mode. The release age rules in `default.json` are checked in the real
+  mode only, so whoever edits `default.json` runs it by hand:
+
+  ```sh
+  REAL_RENOVATE=1 mise x node@24.11.0 npm:renovate@44.238.0 -- \
+    scripts/reusable-renovate-automerge_test.sh
+  ```
 
 ## Development
 

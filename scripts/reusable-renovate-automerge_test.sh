@@ -220,6 +220,21 @@ else
   echo "PASS no workflow or job level env"
 fi
 
+# No step writes to $GITHUB_ENV, where a RENOVATE_* variable would reach
+# Renovate too, and the automerge step is the job's only "run:" step.
+# Comments are skipped, they may name GITHUB_ENV.
+if grep -v '^ *#' "${workflow}" | grep -n 'GITHUB_ENV'; then
+  fail "no step writes to GITHUB_ENV" "found GITHUB_ENV outside a comment"
+else
+  echo "PASS no step writes to GITHUB_ENV"
+fi
+run_steps="$(grep -cE '^ +(- )?run: ' "${workflow}" || true)"
+if [ "${run_steps}" != "1" ]; then
+  fail "the automerge step is the only run step" "found ${run_steps} 'run:' keys, want 1"
+else
+  echo "PASS the automerge step is the only run step"
+fi
+
 # A variable must never be expanded into the script text by the runner.
 if grep -qF "\${{" "${work}/step.sh"; then
   fail "the run block holds no expression" "found '\${{' in the run block"
