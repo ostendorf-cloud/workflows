@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.5.0](https://github.com/ostendorf-cloud/workflows/compare/v0.4.1...v0.5.0) (2026-11-18)
+
+### Features
+
+- **renovate:** switch automerge for patch and minor updates by variable ([#63](https://github.com/ostendorf-cloud/workflows/pull/63))
+- share the pnpm release age comment as a composite action ([#61](https://github.com/ostendorf-cloud/workflows/pull/61))
+
 ## [v0.4.1](https://github.com/ostendorf-cloud/workflows/compare/v0.4.0...v0.4.1) (2026-11-17)
 
 ### Bug Fixes
