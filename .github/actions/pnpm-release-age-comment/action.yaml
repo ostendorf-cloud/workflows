@@ -6,21 +6,28 @@
 # "pull-requests: write", never from the install job itself. The install job runs code of
 # the pull request and keeps "contents: read" only. README.md shows the full caller.
 #
+# The runner needs gh and jq. Both are installed on ubuntu-latest. Without jq the script
+# step fails with 127 and posts nothing.
+#
 # Inputs:
-#   github-token   required, pass "${{ github.token }}". The earlier comment is found by
-#                  the author github-actions[bot], so another token posts a new comment
-#                  on every run.
+#   github-token   required, pass "${{ github.token }}", or a GitHub App token together
+#                  with comment-author. README.md shows both callers.
 #   artifact-name  required, the artifact the install job uploaded its log as, for
 #                  example "install-log-${{ github.run_attempt }}".
 #   log-file       optional, the file name of the log inside the artifact, default
 #                  "install.log".
+#   comment-author optional, the login the token posts as, default
+#                  "github-actions[bot]". For a GitHub App token it is "<app slug>[bot]".
+#                  The earlier comment is found by this author, so a wrong value posts a
+#                  new comment on every run. It must be a GitHub login or an app slug
+#                  with "[bot]", at most 40 characters, or the script step fails.
 # Secrets: none, the token comes in as an input.
 name: pnpm release age comment
 description: Explain a pnpm minimumReleaseAge install failure on the pull request.
 
 inputs:
   github-token:
-    description: The workflow token of the comment job, "github.token", with pull-requests write.
+    description: A token with pull-requests write, "github.token" or a GitHub App token.
     required: true
   artifact-name:
     description: The artifact that holds the install log of the same run attempt.
@@ -29,6 +36,10 @@ inputs:
     description: The file name of the install log inside the artifact.
     required: false
     default: install.log
+  comment-author:
+    description: The login the token posts as, which finds the earlier comment.
+    required: false
+    default: github-actions[bot]
 
 runs:
   using: composite
@@ -53,4 +64,5 @@ runs:
         REPO: ${{ github.repository }}
         PR: ${{ github.event.pull_request.number }}
         LOG_FILE: ${{ inputs.log-file }}
+        COMMENT_AUTHOR: ${{ inputs.comment-author }}
       run: bash "$GITHUB_ACTION_PATH/release-age-comment.sh" "$RUNNER_TEMP/pnpm-release-age-log/$LOG_FILE"

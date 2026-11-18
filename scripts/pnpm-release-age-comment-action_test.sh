@@ -8,12 +8,17 @@
 # job may, and only for the one script step inside the action. The snippet is also linted
 # with actionlint, so the documented caller stays a valid workflow.
 #
-# Environment: RELEASE_AGE_ACTION and RELEASE_AGE_README override the files under test.
+# The app variant of the snippet is held to the same rules, and its token step to the
+# pinned action and the scope of reusable-renovate.yaml.
+#
+# Environment: RELEASE_AGE_ACTION, RELEASE_AGE_README and RELEASE_AGE_RENOVATE override the
+# files under test.
 set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 action=${RELEASE_AGE_ACTION:-$here/../.github/actions/pnpm-release-age-comment/action.yaml}
 readme=${RELEASE_AGE_README:-$here/../README.md}
+renovate=${RELEASE_AGE_RENOVATE:-$here/../.github/workflows/reusable-renovate.yaml}
 # An explicit template, because macOS mktemp ignores TMPDIR without one.
 work=$(mktemp -d "${TMPDIR:-/tmp}/pnpm-release-age-action-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -55,6 +60,13 @@ assert eq '.inputs."github-token".required' true "$a"
 assert eq '.inputs."github-token".default' null "$a"
 assert eq '.inputs."artifact-name".required' true "$a"
 assert eq '.inputs."log-file".default' install.log "$a"
+assert eq '.inputs."comment-author".required' false "$a"
+assert eq '.inputs."comment-author".default' 'github-actions[bot]' "$a"
+assert eq '.inputs | keys | sort | join(",")' artifact-name,comment-author,github-token,log-file "$a"
+# Every input is documented in the header comment above "name:".
+for input in github-token artifact-name log-file comment-author; do
+  assert grep -qE "^#   $input " "$a"
+done
 
 # Two steps: the download and the script. No checkout: the script ships with the action,
 # so the job holding the token never checks out code of the pull request.
@@ -80,7 +92,10 @@ assert eq "$script.env.GH_TOKEN" "\${{ inputs.github-token }}" "$a"
 assert eq "$script.env.REPO" "\${{ github.repository }}" "$a"
 assert eq "$script.env.PR" "\${{ github.event.pull_request.number }}" "$a"
 assert eq "$script.env.LOG_FILE" "\${{ inputs.log-file }}" "$a"
-assert eq "$script.env | keys | sort | join(\",\")" GH_TOKEN,LOG_FILE,PR,REPO "$a"
+assert eq "$script.env.COMMENT_AUTHOR" "\${{ inputs.comment-author }}" "$a"
+assert eq "$script.env | keys | sort | join(\",\")" COMMENT_AUTHOR,GH_TOKEN,LOG_FILE,PR,REPO "$a"
+# The author reaches the script step only, through env.
+assert eq '[.runs.steps[] | tojson | select(test("inputs.comment-author"))] | length' 1 "$a"
 assert eq "$script.run" "bash \"\$GITHUB_ACTION_PATH/release-age-comment.sh\" \"\$RUNNER_TEMP/pnpm-release-age-log/\$LOG_FILE\"" "$a"
 # The token reaches one step only, and no expression is expanded inside a run block.
 assert eq '[.runs.steps[] | select(.env.GH_TOKEN != null)] | length' 1 "$a"
@@ -154,6 +169,67 @@ after_snippet=$(awk '
 ' "$readme")
 assert test "$after_snippet" = "- Never call the action from the install job, and never give the install job"
 assert grep -qF 'never from the install job itself' "$action"
+
+# --- The caller snippet with the dependencies app ---
+
+# The first yaml block under the app heading is the same caller, posting as the app.
+awk '
+  /^### Post as the dependencies app$/ { in_section = 1; next }
+  in_section && /^##/ { exit }
+  in_section && !in_block && /^```yaml$/ { in_block = 1; next }
+  in_block && /^```$/ { exit }
+  in_block { print }
+' "$readme" >"$work/caller-app.yaml"
+p=$work/caller-app.yaml
+assert test -s "$p"
+
+# Everything but the comment job's steps is the default caller unchanged: the install job
+# still names no token and no secret, and the workflow default stays read only.
+assert eq 'del(.jobs["release-age-comment"].steps) | to_json(0)' "$(q 'del(.jobs["release-age-comment"].steps) | to_json(0)' "$c")" "$p"
+assert eq '.permissions | to_json(0)' '{"contents":"read"}' "$p"
+assert eq '.env' null "$p"
+assert lacks "$deps | tojson" 'secrets.' "$p"
+assert lacks "$deps | tojson" 'vars.' "$p"
+assert lacks "$deps | tojson" 'token' "$p"
+assert lacks "$deps | tojson" 'create-github-app-token' "$p"
+
+# The comment job alone writes pull requests, and holds nothing else.
+assert eq '[.jobs[] | select(.permissions."pull-requests" == "write")] | length' 1 "$p"
+assert eq "$comment.permissions | to_json(0)" '{"contents":"read","pull-requests":"write"}' "$p"
+
+# Two steps: mint the app token, then the action with it.
+assert eq "$comment.steps | length" 2 "$p"
+mint="$comment.steps[0]"
+assert eq "$mint.id" app-token "$p"
+# The same pinned action as in reusable-renovate.yaml, digest and version comment.
+renovate_mint=$(grep -oE 'actions/create-github-app-token@[0-9a-f]{40}  # v[0-9.]+' "$renovate")
+assert test -n "$renovate_mint"
+assert grep -qF "      - uses: $renovate_mint" "$readme"
+assert eq "$mint.uses" "${renovate_mint%%  #*}" "$p"
+# Exactly the app, its key and one permission. No "owner" and no "repositories", so the
+# token is scoped to the calling repository only.
+assert eq "$mint.with | keys | sort | join(\",\")" app-id,permission-pull-requests,private-key "$p"
+assert eq "[$mint.with | keys[] | select(test(\"^permission-\"))] | join(\",\")" permission-pull-requests "$p"
+assert eq "$mint.with.\"permission-pull-requests\"" write "$p"
+assert eq "$mint.with.\"app-id\"" "\${{ vars.GH_APP_DEPENDENCIES_APP_ID }}" "$p"
+assert eq "$mint.with.\"private-key\"" "\${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}" "$p"
+# The private key is named once in the whole workflow: in the mint step.
+assert eq '[.. | select(tag == "!!str") | select(test("secrets\\."))] | length' 1 "$p"
+assert eq "[$comment.steps[1:][] | tojson | select(test(\"secrets\\\\.\"))] | length" 0 "$p"
+
+use="$comment.steps[1]"
+assert eq "$use.uses" ostendorf-cloud/workflows/.github/actions/pnpm-release-age-comment@v0 "$p"
+assert eq "$use.with | keys | sort | join(\",\")" artifact-name,comment-author,github-token "$p"
+assert eq "$use.with.\"github-token\"" "\${{ steps.app-token.outputs.token }}" "$p"
+assert eq "$use.with.\"artifact-name\"" "$(q "$comment.steps[0].with.\"artifact-name\"" "$c")" "$p"
+# The login of the app is the one reusable-renovate.yaml knows the app by.
+assert eq "$use.with.\"comment-author\"" 'ostendorf-cloud-dependencies[bot]' "$p"
+assert grep -qF "'ostendorf-cloud-dependencies[bot]'" "$renovate"
+# The workflow token is not passed anywhere in this variant.
+assert lacks 'tojson' 'github.token' "$p"
+
+# The documented app caller is a valid workflow.
+assert actionlint -no-color "$p"
 
 printf '%d checks, %d failed\n' "$checks" "$fails"
 [[ $fails -eq 0 ]]

@@ -12,10 +12,19 @@
 # Usage: release-age-comment.sh LOGFILE
 # Environment: GH_TOKEN, REPO (owner/name), PR (pull request number), and from the
 # workflow GITHUB_SERVER_URL, GITHUB_REPOSITORY and GITHUB_RUN_ID for the run link.
+# COMMENT_AUTHOR is the login the token posts as, default github-actions[bot]. It finds
+# the earlier comment and must be a GitHub login or an app slug with "[bot]".
 set -euo pipefail
 
 log=${1:?usage: release-age-comment.sh LOGFILE}
 : "${REPO:?REPO is not set}" "${PR:?PR is not set}"
+
+author=${COMMENT_AUTHOR:-github-actions[bot]}
+author_re='^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$'
+if [[ ! $author =~ $author_re ]] || ((${#author} > 40)); then
+  echo "COMMENT_AUTHOR must be a GitHub login or an app slug with [bot], at most 40 characters." >&2
+  exit 1
+fi
 
 code=ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION
 marker='<!-- pnpm-release-age -->'
@@ -84,9 +93,11 @@ trap 'rm -f "$body"' EXIT
 
 # Find the comment this script wrote earlier. The author check keeps a copied marker
 # in someone else's comment from being edited, the comment must start with the marker,
-# and the first hit is the oldest.
-id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-  --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | sed -n '1p')
+# and the first hit is the oldest. gh prints one JSON array per page and its --jq takes
+# no arguments, so jq reads the pages and gets the author and the marker as data.
+id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" |
+  jq -r --arg author "$author" --arg marker "$marker" \
+    '.[] | select(.user.login == $author and (.body | startswith($marker))) | .id' | sed -n '1p')
 
 if [[ -n $id ]]; then
   gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" >/dev/null
