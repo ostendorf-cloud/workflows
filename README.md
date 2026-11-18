@@ -90,7 +90,8 @@ Available and planned workflows:
   repository's own `renovate.yaml` does exactly that for itself. The anti-loop logic deciding
   whether an `edited` event should actually trigger a run lives inside `reusable-renovate.yaml`
   itself, as a job-level `if:`, so a caller does not need to write or get that condition right:
-  every caller gets the same centralized check.
+  every caller gets the same centralized check. Two optional variables let Renovate merge patch
+  and minor updates by itself, see [Renovate automerge](#renovate-automerge).
 
   ```yaml
   on:
@@ -288,6 +289,88 @@ rule, Renovate proposes a digest pin for `@v0`. It also reads `#v0` with `semver
 versioning, proposes a bump to the newest exact tag and a digest pin. With the rule, `v0` counts
 as the newest `v0.x` tag, so neither reference gets an update. A new tag of this repository
 moves `v0`, and every consumer picks it up without a change.
+
+## Renovate automerge
+
+`reusable-renovate.yaml` can let Renovate merge updates by itself once the checks are green. Two
+GitHub variables switch it, read from the calling repository or its organisation. Both are off
+by default, so a repository without them behaves as before.
+
+| Variable | Value `true` merges by itself |
+| --- | --- |
+| `RENOVATE_AUTO_MERGE_PATCH` | `patch` updates and `pinDigest` updates |
+| `RENOVATE_AUTO_MERGE_MINOR` | `minor` and `digest` updates, and everything the patch switch covers |
+
+- Only the exact string `true` turns a switch on. `True`, `1`, `yes` or an empty value are off.
+- The minor switch includes patch. `RENOVATE_AUTO_MERGE_MINOR=true` merges patch updates even
+  when `RENOVATE_AUTO_MERGE_PATCH` is unset or `false`.
+- A `pinDigest` update adds the digest of the version already in use. It changes no code.
+- A `digest` update follows the minor switch, not the patch switch. It moves a floating tag such
+  as `node:24`, or a Go module without tags, and can carry more than a patch.
+- Major updates never merge by themselves. Neither do `pin`, `lockFileMaintenance`, `rollback`,
+  `bump`, `replacement` and `lockfileUpdate` updates.
+- Packages under `ostendorf-cloud` never merge by themselves: `ostendorf-cloud/**`,
+  `@ostendorf-cloud/**`, `github.com/ostendorf-cloud/**` and `ghcr.io/ostendorf-cloud/**`. A
+  first party release always needs a human.
+- No release follows by itself. An automerged `fix(deps)` commit only lands in the release pull
+  request that `release-me` keeps open. A release happens when the owner merges that pull
+  request.
+
+### Branch protection comes first
+
+Automerge is only as safe as the checks that gate it.
+
+- Renovate merges a pull request itself only when every status check and check run on its branch
+  has passed. It waits while a check runs and while no check exists at all.
+- Renovate also turns on GitHub's own auto-merge when the repository allows it. GitHub then
+  merges once the required checks pass, and ignores checks that are not required.
+- Required checks come from branch protection or a ruleset. Those live in the infrastructure
+  repository.
+- Turn a switch on only for a repository whose default branch requires the checks that matter.
+
+### Set, override and turn off
+
+A repository variable wins over an organisation variable of the same name. An organisation
+default can therefore be overridden per repository. Where the variables are managed as code in
+the infrastructure repository, set them there instead of with `gh`.
+
+```sh
+# Organisation default: patch updates merge by themselves in every repository.
+gh variable set RENOVATE_AUTO_MERGE_PATCH --org ostendorf-cloud --visibility all --body true
+
+# One repository also merges minor updates.
+gh variable set RENOVATE_AUTO_MERGE_MINOR --repo ostendorf-cloud/<repository> --body true
+
+# One repository opts out of the organisation default.
+gh variable set RENOVATE_AUTO_MERGE_PATCH --repo ostendorf-cloud/<repository> --body false
+```
+
+- To turn automerge off, set the variable to `false` or delete it. Deleting a repository
+  variable falls back to the organisation variable, if one exists.
+- A repository can also veto automerge in its own `renovate.json` with a package rule:
+
+  ```json
+  {
+    "packageRules": [{ "matchPackageNames": ["*"], "automerge": false }]
+  }
+  ```
+
+  A top level `"automerge": false` does not veto. The switch rules are package rules, and package
+  rules apply on top of top level options.
+- The change takes effect on the next Renovate run. A pull request that is already open picks it
+  up when Renovate next processes it.
+
+### How it works
+
+- The step `Build the automerge package rules` compares each variable with `true`. It then picks
+  fixed package rules and passes them to Renovate as `RENOVATE_PACKAGE_RULES`. A variable's
+  value never becomes part of the configuration.
+- Renovate reads those rules into its global configuration. It appends the rules of the
+  repository's own configuration and of its presets after them. A later rule wins over an earlier
+  one.
+- `scripts/reusable-renovate-automerge_test.sh` runs that step for every combination of the two
+  switches. With `REAL_RENOVATE=1` it also validates the rules with `renovate-config-validator
+  --strict` and applies them through Renovate's own code to sample updates under `default.json`.
 
 ## Development
 
