@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.6.0](https://github.com/ostendorf-cloud/workflows/compare/v0.5.0...v0.6.0) (2026-11-18)
+
+### Features
+
+- let the release age comment be posted by an app ([#67](https://github.com/ostendorf-cloud/workflows/pull/67))
+
 ## [v0.5.0](https://github.com/ostendorf-cloud/workflows/compare/v0.4.1...v0.5.0) (2026-11-18)
 
 ### Features
