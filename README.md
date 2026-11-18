@@ -276,9 +276,10 @@ only needs to hold what is actually specific to it:
   entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
   pull request the moment a release appeared and every job downstream of the dependency update
   failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
-- a `packageRules` entry that raises `minimumReleaseAge` to three days for the `github-actions`
-  manager, and one after it that sets it back to `null`, no floor, for `ostendorf-cloud/workflows`.
-  See [GitHub Actions](#github-actions).
+- a `packageRules` entry that raises `minimumReleaseAge` to three days for actions and reusable
+  workflows (`github-actions` manager, depTypes `action` and `workflow`), and one after it that
+  sets it back to `null`, no floor, for `ostendorf-cloud/workflows`. See
+  [GitHub Actions](#github-actions).
 
 ### First party references
 
@@ -312,8 +313,9 @@ by default, so a repository without them behaves as before.
   as `node:24`, or a Go module without tags, and can carry more than a patch.
 - Major updates never merge through these switches. Neither do `pin`, `lockFileMaintenance`,
   `rollback`, `bump`, `replacement` and `lockfileUpdate` updates.
-- A `digest` update of a GitHub Action never merges through these switches, whatever they say.
-  See [GitHub Actions](#github-actions).
+- Nothing the `github-actions` manager finds merges through these switches, whatever they say:
+  no action, no reusable workflow, no container or service image of a workflow. See
+  [GitHub Actions](#github-actions).
 - Packages under `ostendorf-cloud` never merge through these switches. A first party release
   always needs a human. The rule matches `ostendorf-cloud/**`, `@ostendorf-cloud/**`,
   `github.com/ostendorf-cloud/**`, `ghcr.io/ostendorf-cloud/**`,
@@ -331,32 +333,42 @@ by default, so a repository without them behaves as before.
 Actions in this organisation are pinned by digest with a version comment, such as
 `actions/checkout@<sha> # v4.1.2`. Renovate produces two kinds of update for such a reference.
 
-| Change upstream | `updateType` | Version | Automerge |
-| --- | --- | --- | --- |
-| New release `v4.1.3` | `patch`, new digest | `v4.1.3`, semver level set | patch switch |
-| Tag `v4.1.2` moved to another commit | `digest` | `v4.1.2` unchanged, no semver level | never |
+| Change upstream | `updateType` | Version |
+| --- | --- | --- |
+| New release `v4.1.3` | `patch`, new digest | `v4.1.3`, semver level set |
+| Tag `v4.1.2` moved to another commit | `digest` | `v4.1.2` unchanged, no semver level |
 
-- A moved tag is the pattern of a compromised action. The update keeps the version, so
-  `matchUpdateTypes` sees only `digest`, never `patch`, `minor` or `major`.
+- A moved tag is the pattern of a compromised action. When the moved tag is the version in use,
+  the update keeps the version, so `matchUpdateTypes` sees only `digest`.
+- When the moved tag is newer than the version in use, Renovate offers it as an ordinary `patch`
+  or `minor` update with the bad digest. Nothing in the update type tells the two apart.
 - Confirmed against renovate 44.238.0. Its lookup adds `{ updateType: "digest", newValue:
   currentValue }` when the current digest differs from the tag's digest. A lookup run for a
   digest that did not match its tag returned that update with `newMajor`, `newMinor` and
   `newPatch` all `null`. The same run returned `patch`, `minor` and `major` updates with a new
   digest for the newer releases.
-- The workflow therefore adds a rule after the switch rules: GitHub Actions `digest` updates get
-  `automerge: false`.
-- The preset delays every GitHub Action release by three days with `minimumReleaseAge`. A
-  compromised release then has time to be found and pulled before Renovate proposes it. The
-  `github-tags` datasource provides the release timestamps this needs.
-- The floor does not catch a moved tag. Renovate ages a `digest` update by the timestamp of the
-  version, which is old. Only the rule above stops it.
+- GitHub Actions therefore never merge through the switches. The workflow adds
+  `{"matchManagers": ["github-actions"], "automerge": false}` after the switch rules. It covers
+  actions, reusable workflows and the container and service images of a workflow.
+- Actions are few updates per repository. They stay a human decision.
+- The preset delays an action or reusable workflow release by three days with
+  `minimumReleaseAge`. That is a delay that gives a compromised release time to be noticed, not a
+  guarantee:
+  - The `github-tags` datasource dates a tag by its commit date, or by its tagger date for an
+    annotated tag. The pusher controls both. A new tag on a backdated commit passes the floor at
+    once. A GitHub release with a later date moves the date forward.
+  - A moved tag is dated by the commit it now points to. The pusher can backdate that too.
+- The floor matches depTypes `action` and `workflow` only. Container and service images in a
+  workflow get no floor. A `ghcr.io` image has no release timestamp, and with the default
+  `minimumReleaseAgeBehaviour` `timestamp-required` a floor would hold it forever.
 - The first party workflow reference `ostendorf-cloud/workflows` has no floor. It stays on its
   floating tag. Other first party actions, such as `ostendorf-cloud/release-me/action`, wait three
   days too.
-- Docker digests keep following the minor switch, and the preset sets no release age for Docker
-  or other registries. Docker Hub provides release timestamps, many other registries do not.
-  `minimumReleaseAgeBehaviour` defaults to `timestamp-required`, so a floor without a timestamp
-  would hold their updates forever.
+- Docker digests outside workflow files, such as in a Dockerfile, keep following the minor
+  switch. The preset sets no release age for Docker or other registries. Only Docker Hub provides
+  release timestamps, so a floor would hold updates from other registries forever.
+- To let action patches merge again later, remove the one rule `actions_rule` from the step
+  `Build the automerge package rules` in `reusable-renovate.yaml`. The release age floor stays.
 
 ### Branch protection comes first
 

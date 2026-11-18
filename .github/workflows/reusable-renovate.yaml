@@ -72,10 +72,16 @@ name: reusable-renovate
 #
 #   Major updates never merge by themselves through these switches, and
 #   neither do pin, lockFileMaintenance, rollback, bump, replacement and
-#   lockfileUpdate updates. A GitHub Actions digest update never merges
-#   through them either, whatever the switches say: for an action pinned
-#   by digest with a version comment it means the tag moved to another
-#   commit, the pattern of a compromised action. Nothing under
+#   lockfileUpdate updates. Nothing the github-actions manager finds
+#   merges through them either, whatever the switches say: no action, no
+#   reusable workflow, no container or service image of a workflow. A
+#   moved tag offers the bad commit as a digest update, or, when the
+#   moved tag is newer than the version in use, as a patch update. The
+#   tag's date comes from a commit or tagger date the pusher controls, so
+#   the release age floor in default.json only delays an update and gives
+#   a compromised release time to be noticed. It guarantees nothing. To
+#   let action patches merge again later, remove "actions_rule" from the
+#   step below. Nothing under
 #   ostendorf-cloud merges through them: a first party release always
 #   needs a human. A repository's own package rules can still merge any
 #   of these. With both
@@ -338,9 +344,9 @@ jobs:
           patch_rule+='"matchUpdateTypes":["patch","pinDigest"],"automerge":true}'
           minor_rule='{"description":"Automerge minor and digest updates once the checks are green.",'
           minor_rule+='"matchUpdateTypes":["minor","digest"],"automerge":true}'
-          actions_digest_rule='{"description":"A GitHub Actions digest update means the tag moved.'
-          actions_digest_rule+=' It never merges by itself.",'
-          actions_digest_rule+='"matchManagers":["github-actions"],"matchUpdateTypes":["digest"],"automerge":false}'
+          actions_rule='{"description":"GitHub Actions never merge by themselves, a moved or'
+          actions_rule+=' backdated tag can pass every other check.",'
+          actions_rule+='"matchManagers":["github-actions"],"automerge":false}'
           first_party_rule='{"description":"First party packages never merge by themselves.",'
           first_party_rule+='"matchPackageNames":["ostendorf-cloud/**","@ostendorf-cloud/**",'
           first_party_rule+='"github.com/ostendorf-cloud/**","ghcr.io/ostendorf-cloud/**",'
@@ -353,7 +359,7 @@ jobs:
             rules="${rules},${minor_rule}"
           fi
           # After the switch rules, so they win over them.
-          rules="[${rules},${actions_digest_rule},${first_party_rule}]"
+          rules="[${rules},${actions_rule},${first_party_rule}]"
           echo "package-rules=${rules}" >>"${GITHUB_OUTPUT}"
 
       - name: Self-hosted Renovate

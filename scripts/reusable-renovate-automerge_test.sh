@@ -119,8 +119,8 @@ expect_off() {
 
 # expect_on <name> <description> <types>: the case wrote valid JSON, one
 # line, whose automerge rules cover exactly <types>. After them come
-# exactly two rules that turn automerge off: GitHub Actions digest
-# updates, then every first party package. No rule sets any other option.
+# exactly two rules that turn automerge off: every GitHub Actions
+# update, then every first party package. No rule sets any other option.
 expect_on() {
   local name="$1" what="$2" want="$3"
   local rules="${work}/rules-${name}"
@@ -145,9 +145,9 @@ expect_on() {
   fi
   if ! jq -e '
     (.[-2] | del(.description) == {"matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["digest"], "automerge": false})
+      "automerge": false})
   ' "${rules}" >/dev/null; then
-    fail "${what}" "the GitHub Actions digest rule is not second to last or not exact: $(cat "${rules}")"
+    fail "${what}" "the GitHub Actions rule is not second to last or not exact: $(cat "${rules}")"
     return
   fi
   if ! jq -e '
@@ -201,13 +201,23 @@ else
   echo "PASS the Renovate step has exactly the expected keys"
 fi
 
-# The step runs before Renovate, so its output exists when Renovate starts.
-step_line="$(grep -nxF "      - name: ${step_name}" "${workflow}" | cut -d: -f1)"
-renovate_line="$(grep -nxF "      - name: Self-hosted Renovate" "${workflow}" | cut -d: -f1)"
-if [ -z "${step_line}" ] || [ -z "${renovate_line}" ] || [ "${step_line}" -ge "${renovate_line}" ]; then
-  fail "the step runs before Renovate" "step at line '${step_line}', Renovate at line '${renovate_line}'"
+# The step is the one directly before Renovate, so its output exists when
+# Renovate starts and no other step can write to $GITHUB_ENV in between.
+previous_step="$(awk '
+  /^      - / { if ($0 == "      - name: Self-hosted Renovate") { print last; exit } last = $0 }
+' "${workflow}")"
+if [ "${previous_step}" != "      - name: ${step_name}" ]; then
+  fail "the step runs directly before Renovate" "the step before Renovate is '${previous_step}'"
 else
-  echo "PASS the step runs before Renovate"
+  echo "PASS the step runs directly before Renovate"
+fi
+
+# No "env:" at workflow or job level, where it would reach Renovate too,
+# such as RENOVATE_IGNORE_TESTS.
+if grep -nE '^(env:|    env:)' "${workflow}"; then
+  fail "no workflow or job level env" "found an 'env:' key at workflow or job level"
+else
+  echo "PASS no workflow or job level env"
 fi
 
 # A variable must never be expanded into the script text by the runner.
@@ -321,22 +331,32 @@ const merged = mergeChildConfig(mergeChildConfig(getDefaults(), globalConfig), r
 const updateTypes = ['major', 'minor', 'patch', 'pin', 'digest', 'pinDigest',
   'lockFileMaintenance', 'rollback', 'bump', 'replacement'];
 
+// [manager, name, update types, depType]. The github-actions depTypes are
+// the ones renovate's github-actions manager assigns: "action" for a step's
+// "uses", "workflow" for a reusable workflow call, "container" and
+// "service" for a job's images.
 const samples = [
-  ['npm', 'left-pad', ['patch', 'minor', 'major', 'digest', 'pinDigest', 'pin', 'lockFileMaintenance']],
-  ['github-actions', 'actions/checkout', ['patch', 'minor', 'major', 'digest', 'pinDigest']],
-  ['docker', 'node', ['patch', 'digest']],
-  ['gomod', 'golang.org/x/net', ['digest']],
-  ['github-actions', 'ostendorf-cloud/workflows', ['patch', 'digest']],
-  ['github-actions', 'ostendorf-cloud/release-me/action', ['patch']],
-  ['npm', '@ostendorf-cloud/kit', ['patch']],
-  ['gomod', 'github.com/ostendorf-cloud/kit', ['minor']],
-  ['docker', 'ghcr.io/ostendorf-cloud/kit', ['digest']],
-  ['terraform', 'https://github.com/ostendorf-cloud/kit', ['patch']],
-  ['terraform', 'git::https://github.com/ostendorf-cloud/kit', ['patch']],
+  ['npm', 'left-pad', ['patch', 'minor', 'major', 'digest', 'pinDigest', 'pin', 'lockFileMaintenance'], 'dependencies'],
+  ['github-actions', 'actions/checkout', ['patch', 'minor', 'major', 'digest', 'pinDigest'], 'action'],
+  ['github-actions', 'ghcr.io/example/app', ['patch', 'digest'], 'container'],
+  ['github-actions', 'postgres', ['patch', 'digest'], 'service'],
+  ['github-actions', 'example/shared', ['patch'], 'workflow'],
+  // A custom manager may set the depType "action" too. The floor is scoped
+  // to the github-actions manager, so it gets none.
+  ['regex', 'example/tool', ['patch'], 'action'],
+  ['dockerfile', 'node', ['patch', 'digest'], 'final'],
+  ['gomod', 'golang.org/x/net', ['digest'], 'require'],
+  ['github-actions', 'ostendorf-cloud/workflows', ['patch', 'digest'], 'workflow'],
+  ['github-actions', 'ostendorf-cloud/release-me/action', ['patch'], 'action'],
+  ['npm', '@ostendorf-cloud/kit', ['patch'], 'dependencies'],
+  ['gomod', 'github.com/ostendorf-cloud/kit', ['minor'], 'require'],
+  ['dockerfile', 'ghcr.io/ostendorf-cloud/kit', ['digest'], 'final'],
+  ['terraform', 'https://github.com/ostendorf-cloud/kit', ['patch'], 'module'],
+  ['terraform', 'git::https://github.com/ostendorf-cloud/kit', ['patch'], 'module'],
 ];
-for (const [manager, name, types] of samples) {
+for (const [manager, name, types, depType] of samples) {
   for (const updateType of types) {
-    let c = { ...merged, manager, depName: name, packageName: name, updateType };
+    let c = { ...merged, manager, depType, depName: name, packageName: name, updateType };
     c = await applyPackageRules(c, 'datasource-merge');
     c = mergeChildConfig(c, c[updateType]);
     for (const t of updateTypes) delete c[t];
@@ -383,41 +403,46 @@ EOF
     fi
   done
 
+  # Nothing the github-actions manager finds merges: no action, no
+  # reusable workflow, no container or service image.
   patch_want="$(lines \
-    "merge patch github-actions actions/checkout" \
     "merge patch npm left-pad" \
-    "merge pinDigest github-actions actions/checkout" \
     "merge pinDigest npm left-pad" \
-    "merge patch docker node")"
+    "merge patch dockerfile node" \
+    "merge patch regex example/tool")"
   minor_want="$(lines \
-    "merge digest docker node" \
+    "merge digest dockerfile node" \
     "merge digest gomod golang.org/x/net" \
     "merge digest npm left-pad" \
-    "merge minor github-actions actions/checkout" \
     "merge minor npm left-pad" \
-    "merge patch docker node" \
-    "merge patch github-actions actions/checkout" \
+    "merge patch dockerfile node" \
     "merge patch npm left-pad" \
-    "merge pinDigest github-actions actions/checkout" \
+    "merge patch regex example/tool" \
     "merge pinDigest npm left-pad")"
 
   expect_resolved unset "off: nothing automerges under default.json" "${preset}" ""
-  expect_resolved patch "patch: third party patch and pinDigest automerge" "${preset}" "${patch_want}"
-  expect_resolved both "patch and minor: third party patch, minor and digest automerge, no GitHub Actions digest" \
+  expect_resolved patch "patch: third party patch and pinDigest automerge, no GitHub Actions" "${preset}" \
+    "${patch_want}"
+  expect_resolved both "patch and minor: third party patch, minor and digest automerge, no GitHub Actions" \
     "${preset}" "${minor_want}"
   expect_resolved minor "minor alone: the same as patch and minor" "${preset}" "${minor_want}"
 
-  # The release age floor of the preset: three days for GitHub Actions,
-  # none for the first party workflow reference, two days for npm, none
-  # for other managers. It applies with the switches off too.
+  # The release age floor of the preset: three days for actions and
+  # reusable workflows, none for container and service images in a
+  # workflow, none for the first party workflow reference, two days for
+  # npm, none for other managers. It applies with the switches off too.
   got_age="$(resolve unset "${preset}" | grep '^age ' || true)"
   want_age="$(lines \
-    "age docker node none" \
+    "age dockerfile node none" \
     "age github-actions actions/checkout 3 days" \
+    "age github-actions example/shared 3 days" \
+    "age github-actions ghcr.io/example/app none" \
+    "age github-actions postgres none" \
     "age github-actions ostendorf-cloud/release-me/action 3 days" \
     "age github-actions ostendorf-cloud/workflows none" \
     "age npm @ostendorf-cloud/kit 2 days" \
     "age npm left-pad 2 days" \
+    "age regex example/tool none" \
     "age terraform git::https://github.com/ostendorf-cloud/kit none" \
     "age terraform https://github.com/ostendorf-cloud/kit none")"
   if [ "${got_age}" != "${want_age}" ]; then

@@ -17,8 +17,9 @@
       "minimumReleaseAge": "2 days"
     },
     {
-      "description": "A GitHub Action release waits three days, so a compromised release can be pulled before it reaches us.",
+      "description": "An action or reusable workflow release waits three days, so a compromised release has time to be noticed. A backdated tag passes at once. Container and service images get no floor.",
       "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action", "workflow"],
       "minimumReleaseAge": "3 days"
     },
     {
