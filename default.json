@@ -15,6 +15,18 @@
     {
       "matchManagers": ["npm"],
       "minimumReleaseAge": "2 days"
+    },
+    {
+      "description": "An action or reusable workflow release waits three days, so a compromised release has time to be noticed. A backdated tag passes at once. Container and service images get no floor.",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action", "workflow"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "The first party workflow reference stays on its floating tag and needs no release age floor.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ostendorf-cloud/workflows"],
+      "minimumReleaseAge": null
     }
   ]
 }

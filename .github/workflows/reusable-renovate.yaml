@@ -53,6 +53,68 @@ name: reusable-renovate
 #   contract this workflow needs is documented rather than implicit. Its
 #   name matches the organisation's own secret name exactly, so
 #   "secrets: inherit" populates it with no remapping.
+#
+# Variables (optional, both default off):
+#   RENOVATE_AUTO_MERGE_PATCH: the value "true" lets Renovate merge patch
+#     updates and digest pins (pinDigest) by itself once the checks are
+#     green. Any other value, or no variable, is off.
+#   RENOVATE_AUTO_MERGE_MINOR: the value "true" lets Renovate merge minor
+#     and digest updates by itself, and patch updates and digest pins as
+#     well, whatever RENOVATE_AUTO_MERGE_PATCH says. Any other value, or no
+#     variable, is off.
+#
+#   Only the exact, lower case string "true" counts as on. Both are read
+#   as "vars.*", so a called workflow sees the CALLER's variables, never
+#   this repository's. GitHub resolves a repository variable over an
+#   organisation variable of the same name, so an organisation default
+#   can be overridden per repository, for example with "false". A caller
+#   sets no input for this.
+#
+#   Major updates never merge by themselves through these switches, and
+#   neither do pin, lockFileMaintenance, rollback, bump, replacement and
+#   lockfileUpdate updates. Nothing the github-actions manager finds
+#   merges through them either, whatever the switches say: no action, no
+#   reusable workflow, no container or service image of a workflow. A
+#   moved tag offers the bad commit as a digest update, or, when the
+#   moved tag is newer than the version in use, as a patch update. The
+#   tag's date comes from a commit or tagger date the pusher controls, so
+#   the release age floor in default.json only delays an update and gives
+#   a compromised release time to be noticed. It guarantees nothing. To
+#   let action patches merge again later, remove "actions_rule" from the
+#   step below. Nothing under
+#   ostendorf-cloud merges through them: a first party release always
+#   needs a human. A repository's own package rules can still merge any
+#   of these. With both
+#   switches off, the step "Build the automerge package rules" below
+#   emits nothing and Renovate runs exactly as before.
+#
+#   How the switch reaches Renovate: the step builds a JSON array of
+#   package rules from fixed string literals, only choosing which literals
+#   to include by comparing each variable with "true". A variable's value
+#   is never written into the JSON. The array reaches Renovate as
+#   "RENOVATE_PACKAGE_RULES", which renovatebot/github-action passes into
+#   its container like every "RENOVATE_*" variable. Renovate reads it into
+#   its global config, and merges each repository's own config over that.
+#   "packageRules" is a mergeable option: the repository's rules, the ones
+#   from its presets included, are appended after these, and a later rule
+#   wins over an earlier one. So a repository vetoes automerge with a rule
+#   of its own, such as {"matchPackageNames": ["*"], "automerge": false}.
+#   A top level "automerge": false in the repository does NOT veto, since
+#   package rules apply on top of top level options. Confirmed by reading
+#   renovate 44.238.0's own code: "mergeChildConfig" concatenates
+#   mergeable arrays parent first, and "applyPackageRules" applies every
+#   matching rule in order.
+#
+#   Automerge waits for green checks. Renovate itself merges only when
+#   no status check and no check run on the branch failed or is still
+#   running, and not while none exist. A skipped or neutral check run
+#   counts as passed, so a path filtered workflow does not gate an update
+#   outside its paths. With "Allow auto-merge" on in the repository, it
+#   also turns on GitHub's own auto-merge (platformAutomerge, default on),
+#   which merges once the REQUIRED checks pass. Required checks come from
+#   branch protection, which lives in the infrastructure repository. Turn
+#   a switch on only for a repository whose branch protection requires
+#   the checks that matter.
 on:
   workflow_call:
     inputs:
@@ -249,6 +311,57 @@ jobs:
           # workflow is the per-repository model issue #28 moves to, so it
           # must not do that.
 
+      # Turns the two automerge variables into Renovate package rules, see
+      # "Variables" in the header comment above. The variables arrive as
+      # environment variables, never as expression text inside the
+      # script, and are only compared with "true". The rules are fixed
+      # literals, so no variable value can reach the JSON. With both
+      # switches off the step writes no output, the environment variable
+      # below stays empty, and Renovate ignores an empty one.
+      # scripts/reusable-renovate-automerge_test.sh runs this block.
+      - name: Build the automerge package rules
+        id: automerge
+        env:
+          AUTO_MERGE_PATCH: ${{ vars.RENOVATE_AUTO_MERGE_PATCH }}
+          AUTO_MERGE_MINOR: ${{ vars.RENOVATE_AUTO_MERGE_MINOR }}
+        run: |
+          patch=false
+          minor=false
+          if [ "${AUTO_MERGE_MINOR:-}" = "true" ]; then
+            minor=true
+            patch=true
+          fi
+          if [ "${AUTO_MERGE_PATCH:-}" = "true" ]; then
+            patch=true
+          fi
+          echo "automerge: patch=${patch} minor=${minor}"
+
+          if [ "${patch}" != "true" ]; then
+            exit 0
+          fi
+
+          patch_rule='{"description":"Automerge patch updates and digest pins once the checks are green.",'
+          patch_rule+='"matchUpdateTypes":["patch","pinDigest"],"automerge":true}'
+          minor_rule='{"description":"Automerge minor and digest updates once the checks are green.",'
+          minor_rule+='"matchUpdateTypes":["minor","digest"],"automerge":true}'
+          actions_rule='{"description":"GitHub Actions never merge by themselves, a moved or'
+          actions_rule+=' backdated tag can pass every other check.",'
+          actions_rule+='"matchManagers":["github-actions"],"automerge":false}'
+          first_party_rule='{"description":"First party packages never merge by themselves.",'
+          first_party_rule+='"matchPackageNames":["ostendorf-cloud/**","@ostendorf-cloud/**",'
+          first_party_rule+='"github.com/ostendorf-cloud/**","ghcr.io/ostendorf-cloud/**",'
+          first_party_rule+='"https://github.com/ostendorf-cloud/**",'
+          first_party_rule+='"git::https://github.com/ostendorf-cloud/**"],'
+          first_party_rule+='"automerge":false}'
+
+          rules="${patch_rule}"
+          if [ "${minor}" = "true" ]; then
+            rules="${rules},${minor_rule}"
+          fi
+          # After the switch rules, so they win over them.
+          rules="[${rules},${actions_rule},${first_party_rule}]"
+          echo "package-rules=${rules}" >>"${GITHUB_OUTPUT}"
+
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@acdd6bda8b035c99ce59d5675816af2aa65a1774  # v46.3.14
         with:
@@ -258,5 +371,8 @@ jobs:
         # change is the token's scope: it now sees exactly one repository,
         # so autodiscovery finds exactly that one, see the header comment
         # above for why this does not need "RENOVATE_REPOSITORIES" instead.
+        # "RENOVATE_PACKAGE_RULES" carries the automerge rules of the step
+        # above, or nothing when both switches are off.
         env:
           RENOVATE_AUTODISCOVER: 'true'
+          RENOVATE_PACKAGE_RULES: ${{ steps.automerge.outputs.package-rules }}

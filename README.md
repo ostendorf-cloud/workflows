@@ -90,7 +90,8 @@ Available and planned workflows:
   repository's own `renovate.yaml` does exactly that for itself. The anti-loop logic deciding
   whether an `edited` event should actually trigger a run lives inside `reusable-renovate.yaml`
   itself, as a job-level `if:`, so a caller does not need to write or get that condition right:
-  every caller gets the same centralized check.
+  every caller gets the same centralized check. Two optional variables let Renovate merge patch
+  and minor updates by itself, see [Renovate automerge](#renovate-automerge).
 
   ```yaml
   on:
@@ -275,6 +276,10 @@ only needs to hold what is actually specific to it:
   entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
   pull request the moment a release appeared and every job downstream of the dependency update
   failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
+- a `packageRules` entry that raises `minimumReleaseAge` to three days for actions and reusable
+  workflows (`github-actions` manager, depTypes `action` and `workflow`), and one after it that
+  sets it back to `null`, no floor, for `ostendorf-cloud/workflows`. See
+  [GitHub Actions](#github-actions).
 
 ### First party references
 
@@ -288,6 +293,164 @@ rule, Renovate proposes a digest pin for `@v0`. It also reads `#v0` with `semver
 versioning, proposes a bump to the newest exact tag and a digest pin. With the rule, `v0` counts
 as the newest `v0.x` tag, so neither reference gets an update. A new tag of this repository
 moves `v0`, and every consumer picks it up without a change.
+
+## Renovate automerge
+
+`reusable-renovate.yaml` can let Renovate merge updates by itself once the checks are green. Two
+GitHub variables switch it, read from the calling repository or its organisation. Both are off
+by default, so a repository without them behaves as before.
+
+| Variable | Value `true` merges by itself |
+| --- | --- |
+| `RENOVATE_AUTO_MERGE_PATCH` | `patch` updates and `pinDigest` updates |
+| `RENOVATE_AUTO_MERGE_MINOR` | `minor` and `digest` updates, and everything the patch switch covers |
+
+- Only the exact string `true` turns a switch on. `True`, `1`, `yes` or an empty value are off.
+- The minor switch includes patch. `RENOVATE_AUTO_MERGE_MINOR=true` merges patch updates even
+  when `RENOVATE_AUTO_MERGE_PATCH` is unset or `false`.
+- A `pinDigest` update adds the digest of the version already in use. It changes no code.
+- A `digest` update follows the minor switch, not the patch switch. It moves a floating tag such
+  as `node:24`, or a Go module without tags, and can carry more than a patch.
+- Major updates never merge through these switches. Neither do `pin`, `lockFileMaintenance`,
+  `rollback`, `bump`, `replacement` and `lockfileUpdate` updates.
+- Nothing the `github-actions` manager finds merges through these switches, whatever they say:
+  no action, no reusable workflow, no container or service image of a workflow. See
+  [GitHub Actions](#github-actions).
+- Packages under `ostendorf-cloud` never merge through these switches. A first party release
+  always needs a human. The rule matches `ostendorf-cloud/**`, `@ostendorf-cloud/**`,
+  `github.com/ostendorf-cloud/**`, `ghcr.io/ostendorf-cloud/**`,
+  `https://github.com/ostendorf-cloud/**` and `git::https://github.com/ostendorf-cloud/**`.
+- A repository's own configuration can still merge any of these. A package rule with
+  `matchUpdateTypes: ["major"]` and `automerge: true`, the `:automergeAll` preset or a top level
+  `major: { "automerge": true }` merges majors. A package rule with `matchPackageNames: ["*"]` and
+  `automerge: true` merges first party packages.
+- No release follows by itself. An automerged `fix(deps)` commit only lands in the release pull
+  request that `release-me` keeps open. A release happens when the owner merges that pull
+  request.
+
+### GitHub Actions
+
+Actions in this organisation are pinned by digest with a version comment, such as
+`actions/checkout@<sha> # v4.1.2`. Renovate produces two kinds of update for such a reference.
+
+| Change upstream | `updateType` | Version |
+| --- | --- | --- |
+| New release `v4.1.3` | `patch`, new digest | `v4.1.3`, semver level set |
+| Tag `v4.1.2` moved to another commit | `digest` | `v4.1.2` unchanged, no semver level |
+
+- A moved tag is the pattern of a compromised action. When the moved tag is the version in use,
+  the update keeps the version, so `matchUpdateTypes` sees only `digest`.
+- When the moved tag is newer than the version in use, Renovate offers it as an ordinary `patch`
+  or `minor` update with the bad digest. Nothing in the update type tells the two apart.
+- Confirmed against renovate 44.238.0. Its lookup adds `{ updateType: "digest", newValue:
+  currentValue }` when the current digest differs from the tag's digest. A lookup run for a
+  digest that did not match its tag returned that update with `newMajor`, `newMinor` and
+  `newPatch` all `null`. The same run returned `patch`, `minor` and `major` updates with a new
+  digest for the newer releases.
+- GitHub Actions therefore never merge through the switches. The workflow adds
+  `{"matchManagers": ["github-actions"], "automerge": false}` after the switch rules. It covers
+  actions, reusable workflows and the container and service images of a workflow.
+- Actions are few updates per repository. They stay a human decision.
+- The preset delays an action or reusable workflow release by three days with
+  `minimumReleaseAge`. That is a delay that gives a compromised release time to be noticed, not a
+  guarantee:
+  - The `github-tags` datasource dates a tag by its commit date, or by its tagger date for an
+    annotated tag. The pusher controls both. A new tag on a backdated commit passes the floor at
+    once. A GitHub release with a later date moves the date forward.
+  - A moved tag is dated by the commit it now points to. The pusher can backdate that too.
+- The floor matches depTypes `action` and `workflow` only. Container and service images in a
+  workflow get no floor. A `ghcr.io` image has no release timestamp, and with the default
+  `minimumReleaseAgeBehaviour` `timestamp-required` a floor would hold it forever.
+- The first party workflow reference `ostendorf-cloud/workflows` has no floor. It stays on its
+  floating tag. Other first party actions, such as `ostendorf-cloud/release-me/action`, wait three
+  days too.
+- Docker digests outside workflow files, such as in a Dockerfile, keep following the minor
+  switch. The preset sets no release age for Docker or other registries. Only Docker Hub provides
+  release timestamps, so a floor would hold updates from other registries forever.
+- To let action patches merge again later, remove the one rule `actions_rule` from the step
+  `Build the automerge package rules` in `reusable-renovate.yaml`. The release age floor stays.
+
+### Branch protection comes first
+
+Automerge is only as safe as the checks that gate it.
+
+- Renovate merges a pull request itself only when no status check and no check run on its branch
+  failed or is still running. It waits while no check exists at all.
+- A skipped or neutral check run counts as passed. A workflow with a path filter therefore does
+  not gate an update outside its paths.
+- Renovate does not read the required checks itself. It relies on GitHub's merge API, which
+  refuses a merge while a required check is missing.
+- Renovate also turns on GitHub's own auto-merge when the repository allows it. GitHub then
+  merges once the required checks pass, and ignores checks that are not required.
+- Required checks come from branch protection or a ruleset. Those live in the infrastructure
+  repository.
+- Turn a switch on only for a repository whose default branch requires the checks that matter.
+- To check in the infrastructure repository, not verified here:
+  - The `ostendorf-cloud-dependencies` app is no bypass actor of a ruleset on the default branch.
+  - The app has contents write and pull requests write.
+  - The app has workflows write, to merge a pull request that changes a workflow file.
+
+### Set, override and turn off
+
+A repository variable wins over an organisation variable of the same name. An organisation
+default can therefore be overridden per repository. Where the variables are managed as code in
+the infrastructure repository, set them there instead of with `gh`.
+
+```sh
+# Organisation default: patch updates merge by themselves in every repository.
+gh variable set RENOVATE_AUTO_MERGE_PATCH --org ostendorf-cloud --visibility all --body true
+
+# One repository also merges minor updates.
+gh variable set RENOVATE_AUTO_MERGE_MINOR --repo ostendorf-cloud/<repository> --body true
+
+# One repository opts out of the organisation default.
+gh variable set RENOVATE_AUTO_MERGE_PATCH --repo ostendorf-cloud/<repository> --body false
+```
+
+- To turn automerge off, set the variable to `false` or delete it. Deleting a repository
+  variable falls back to the organisation variable, if one exists.
+- A repository can also veto automerge in its own `renovate.json` with a package rule:
+
+  ```json
+  {
+    "packageRules": [{ "matchPackageNames": ["*"], "automerge": false }]
+  }
+  ```
+
+  These do NOT veto: a top level `"automerge": false`, and a top level
+  `"patch": { "automerge": false }`. The switch rules are package rules. Renovate applies package
+  rules on top of top level options, and again after the config of the update type.
+- The change takes effect on the next Renovate run, for Renovate's own merge.
+- It does not reach a pull request that Renovate already armed with GitHub's native auto-merge
+  (`platformAutomerge`, on by default). That pull request keeps GitHub's auto-merge and merges once
+  its required checks pass. Turning a switch off, or adding the veto rule, does not disarm it.
+  Disarm each one by hand, or close it:
+
+  ```sh
+  gh pr merge <number> --disable-auto
+  ```
+
+  Read from the code of renovate 44.238.0, not tested live: its GitHub platform has
+  `cancelPlatformAutomerge`, but no code under `workers` calls it.
+
+### How it works
+
+- The step `Build the automerge package rules` compares each variable with `true`. It then picks
+  fixed package rules and passes them to Renovate as `RENOVATE_PACKAGE_RULES`. A variable's
+  value never becomes part of the configuration.
+- Renovate reads those rules into its global configuration. It appends the rules of the
+  repository's own configuration and of its presets after them. A later rule wins over an earlier
+  one.
+- `scripts/reusable-renovate-automerge_test.sh` runs that step for every combination of the two
+  switches. With `REAL_RENOVATE=1` it also validates the rules with `renovate-config-validator
+  --strict` and applies them through Renovate's own code to sample updates under `default.json`.
+- CI runs only the default mode. The release age rules in `default.json` are checked in the real
+  mode only, so whoever edits `default.json` runs it by hand:
+
+  ```sh
+  REAL_RENOVATE=1 mise x node@24.11.0 npm:renovate@44.238.0 -- \
+    scripts/reusable-renovate-automerge_test.sh
+  ```
 
 ## Development
 
