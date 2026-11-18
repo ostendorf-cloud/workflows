@@ -276,6 +276,9 @@ only needs to hold what is actually specific to it:
   entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
   pull request the moment a release appeared and every job downstream of the dependency update
   failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
+- a `packageRules` entry that raises `minimumReleaseAge` to three days for the `github-actions`
+  manager, and one after it that sets it back to `null`, no floor, for `ostendorf-cloud/workflows`.
+  See [GitHub Actions](#github-actions).
 
 ### First party references
 
@@ -307,26 +310,73 @@ by default, so a repository without them behaves as before.
 - A `pinDigest` update adds the digest of the version already in use. It changes no code.
 - A `digest` update follows the minor switch, not the patch switch. It moves a floating tag such
   as `node:24`, or a Go module without tags, and can carry more than a patch.
-- Major updates never merge by themselves. Neither do `pin`, `lockFileMaintenance`, `rollback`,
-  `bump`, `replacement` and `lockfileUpdate` updates.
-- Packages under `ostendorf-cloud` never merge by themselves: `ostendorf-cloud/**`,
-  `@ostendorf-cloud/**`, `github.com/ostendorf-cloud/**` and `ghcr.io/ostendorf-cloud/**`. A
-  first party release always needs a human.
+- Major updates never merge through these switches. Neither do `pin`, `lockFileMaintenance`,
+  `rollback`, `bump`, `replacement` and `lockfileUpdate` updates.
+- A `digest` update of a GitHub Action never merges through these switches, whatever they say.
+  See [GitHub Actions](#github-actions).
+- Packages under `ostendorf-cloud` never merge through these switches. A first party release
+  always needs a human. The rule matches `ostendorf-cloud/**`, `@ostendorf-cloud/**`,
+  `github.com/ostendorf-cloud/**`, `ghcr.io/ostendorf-cloud/**`,
+  `https://github.com/ostendorf-cloud/**` and `git::https://github.com/ostendorf-cloud/**`.
+- A repository's own configuration can still merge any of these. A package rule with
+  `matchUpdateTypes: ["major"]` and `automerge: true`, the `:automergeAll` preset or a top level
+  `major: { "automerge": true }` merges majors. A package rule with `matchPackageNames: ["*"]` and
+  `automerge: true` merges first party packages.
 - No release follows by itself. An automerged `fix(deps)` commit only lands in the release pull
   request that `release-me` keeps open. A release happens when the owner merges that pull
   request.
+
+### GitHub Actions
+
+Actions in this organisation are pinned by digest with a version comment, such as
+`actions/checkout@<sha> # v4.1.2`. Renovate produces two kinds of update for such a reference.
+
+| Change upstream | `updateType` | Version | Automerge |
+| --- | --- | --- | --- |
+| New release `v4.1.3` | `patch`, new digest | `v4.1.3`, semver level set | patch switch |
+| Tag `v4.1.2` moved to another commit | `digest` | `v4.1.2` unchanged, no semver level | never |
+
+- A moved tag is the pattern of a compromised action. The update keeps the version, so
+  `matchUpdateTypes` sees only `digest`, never `patch`, `minor` or `major`.
+- Confirmed against renovate 44.238.0. Its lookup adds `{ updateType: "digest", newValue:
+  currentValue }` when the current digest differs from the tag's digest. A lookup run for a
+  digest that did not match its tag returned that update with `newMajor`, `newMinor` and
+  `newPatch` all `null`. The same run returned `patch`, `minor` and `major` updates with a new
+  digest for the newer releases.
+- The workflow therefore adds a rule after the switch rules: GitHub Actions `digest` updates get
+  `automerge: false`.
+- The preset delays every GitHub Action release by three days with `minimumReleaseAge`. A
+  compromised release then has time to be found and pulled before Renovate proposes it. The
+  `github-tags` datasource provides the release timestamps this needs.
+- The floor does not catch a moved tag. Renovate ages a `digest` update by the timestamp of the
+  version, which is old. Only the rule above stops it.
+- The first party workflow reference `ostendorf-cloud/workflows` has no floor. It stays on its
+  floating tag. Other first party actions, such as `ostendorf-cloud/release-me/action`, wait three
+  days too.
+- Docker digests keep following the minor switch, and the preset sets no release age for Docker
+  or other registries. Docker Hub provides release timestamps, many other registries do not.
+  `minimumReleaseAgeBehaviour` defaults to `timestamp-required`, so a floor without a timestamp
+  would hold their updates forever.
 
 ### Branch protection comes first
 
 Automerge is only as safe as the checks that gate it.
 
-- Renovate merges a pull request itself only when every status check and check run on its branch
-  has passed. It waits while a check runs and while no check exists at all.
+- Renovate merges a pull request itself only when no status check and no check run on its branch
+  failed or is still running. It waits while no check exists at all.
+- A skipped or neutral check run counts as passed. A workflow with a path filter therefore does
+  not gate an update outside its paths.
+- Renovate does not read the required checks itself. It relies on GitHub's merge API, which
+  refuses a merge while a required check is missing.
 - Renovate also turns on GitHub's own auto-merge when the repository allows it. GitHub then
   merges once the required checks pass, and ignores checks that are not required.
 - Required checks come from branch protection or a ruleset. Those live in the infrastructure
   repository.
 - Turn a switch on only for a repository whose default branch requires the checks that matter.
+- To check in the infrastructure repository, not verified here:
+  - The `ostendorf-cloud-dependencies` app is no bypass actor of a ruleset on the default branch.
+  - The app has contents write and pull requests write.
+  - The app has workflows write, to merge a pull request that changes a workflow file.
 
 ### Set, override and turn off
 
@@ -355,8 +405,9 @@ gh variable set RENOVATE_AUTO_MERGE_PATCH --repo ostendorf-cloud/<repository> --
   }
   ```
 
-  A top level `"automerge": false` does not veto. The switch rules are package rules, and package
-  rules apply on top of top level options.
+  These do NOT veto: a top level `"automerge": false`, and a top level
+  `"patch": { "automerge": false }`. The switch rules are package rules. Renovate applies package
+  rules on top of top level options, and again after the config of the update type.
 - The change takes effect on the next Renovate run. A pull request that is already open picks it
   up when Renovate next processes it.
 

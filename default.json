@@ -15,6 +15,17 @@
     {
       "matchManagers": ["npm"],
       "minimumReleaseAge": "2 days"
+    },
+    {
+      "description": "A GitHub Action release waits three days, so a compromised release can be pulled before it reaches us.",
+      "matchManagers": ["github-actions"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "The first party workflow reference stays on its floating tag and needs no release age floor.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ostendorf-cloud/workflows"],
+      "minimumReleaseAge": null
     }
   ]
 }

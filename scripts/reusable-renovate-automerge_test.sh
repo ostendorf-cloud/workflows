@@ -12,9 +12,10 @@
 # renovate on PATH: "renovate-config-validator --strict" validates it as
 # global config, and renovate's own code reads it from
 # RENOVATE_PACKAGE_RULES, merges this repository's default.json over it as
-# a repository config, and applies the package rules to sample updates.
-# That shows which update gets "automerge": true, with no platform and no
-# network. CI does not set it. Example:
+# a repository config, and applies the package rules to sample updates in
+# the order renovate's "flatten" step uses. That shows which update gets
+# "automerge": true and which "minimumReleaseAge" applies, with no
+# platform and no network. CI does not set it. Example:
 #   REAL_RENOVATE=1 mise x node@24.11.0 npm:renovate@44.238.0 -- \
 #     scripts/reusable-renovate-automerge_test.sh
 set -euo pipefail
@@ -22,6 +23,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="${script_dir}/.."
 workflow="${REUSABLE_RENOVATE_WORKFLOW:-${repo_dir}/.github/workflows/reusable-renovate.yaml}"
+preset="${RENOVATE_PRESET:-${repo_dir}/default.json}"
 # An explicit template, because macOS mktemp ignores TMPDIR without one.
 work="$(mktemp -d "${TMPDIR:-/tmp}/reusable-renovate-automerge.XXXXXXXX")"
 trap 'rm -rf "${work}"' EXIT
@@ -51,10 +53,14 @@ awk -v name="      - name: ${step_name}" '
   in_step { print }
 ' "${workflow}" >"${work}/wiring"
 
-# The Renovate step, up to the next step or the end of the file.
+# The Renovate step without comments and without its "uses:" line, whose
+# digest Renovate itself updates, up to the next step or the end of the
+# file.
 awk '
   /^      - name: Self-hosted Renovate$/ { in_step = 1; next }
   in_step && /^      - / { exit }
+  in_step && /^ *#/ { next }
+  in_step && /^        uses: / { next }
   in_step { print }
 ' "${workflow}" >"${work}/renovate-step"
 
@@ -87,7 +93,8 @@ run_case() {
 }
 
 # The update types the rules of one case set "automerge": true for,
-# sorted and comma separated.
+# sorted and comma separated. A rule without "matchUpdateTypes" counts as
+# "ALL".
 on_types() {
   jq -r '[.[] | select(.automerge == true) | (.matchUpdateTypes // ["ALL"])[]] | sort | join(",")' \
     "${work}/rules-$1"
@@ -111,8 +118,9 @@ expect_off() {
 }
 
 # expect_on <name> <description> <types>: the case wrote valid JSON, one
-# line, whose automerge rules cover exactly <types>, and whose last rule
-# turns automerge off for every first party package.
+# line, whose automerge rules cover exactly <types>. After them come
+# exactly two rules that turn automerge off: GitHub Actions digest
+# updates, then every first party package. No rule sets any other option.
 expect_on() {
   local name="$1" what="$2" want="$3"
   local rules="${work}/rules-${name}"
@@ -136,48 +144,87 @@ expect_on() {
     return
   fi
   if ! jq -e '
-    (.[-1] | .automerge == false and (has("matchUpdateTypes") | not) and
-      (.matchPackageNames | sort) == (["@ostendorf-cloud/**",
-        "ghcr.io/ostendorf-cloud/**", "github.com/ostendorf-cloud/**",
-        "ostendorf-cloud/**"]))
-    and ([.[] | select(.automerge == false)] | length) == 1
-    and ([.[] | keys[]] - ["automerge", "description", "matchPackageNames",
-      "matchUpdateTypes"] | length) == 0
+    (.[-2] | del(.description) == {"matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest"], "automerge": false})
   ' "${rules}" >/dev/null; then
-    fail "${what}" "the first party rule is not last, not complete, or other options are set: $(cat "${rules}")"
+    fail "${what}" "the GitHub Actions digest rule is not second to last or not exact: $(cat "${rules}")"
+    return
+  fi
+  if ! jq -e '
+    (.[-1] | .automerge == false and (has("matchUpdateTypes") | not) and
+      (has("matchManagers") | not) and
+      (.matchPackageNames | sort) == (["@ostendorf-cloud/**",
+        "ghcr.io/ostendorf-cloud/**", "git::https://github.com/ostendorf-cloud/**",
+        "github.com/ostendorf-cloud/**", "https://github.com/ostendorf-cloud/**",
+        "ostendorf-cloud/**"]))
+    and ([.[:-2][] | .automerge] | all(. == true))
+  ' "${rules}" >/dev/null; then
+    fail "${what}" "the first party rule is not last or not complete: $(cat "${rules}")"
+    return
+  fi
+  # The only guard against a switch rule that also sets an option such as
+  # "ignoreTests" or "automergeType".
+  if ! jq -e '
+    [.[] | keys[]] - ["automerge", "description", "matchManagers",
+      "matchPackageNames", "matchUpdateTypes"] | length == 0
+  ' "${rules}" >/dev/null; then
+    fail "${what}" "a rule sets another option: $(cat "${rules}")"
     return
   fi
   echo "PASS ${what}"
 }
 
 # The step reads both variables from the caller's "vars", has the id the
-# Renovate step reads its output from, and the Renovate step passes that
-# output on as RENOVATE_PACKAGE_RULES.
-for want in \
-  "        id: automerge" \
-  "          AUTO_MERGE_PATCH: \${{ vars.RENOVATE_AUTO_MERGE_PATCH }}" \
-  "          AUTO_MERGE_MINOR: \${{ vars.RENOVATE_AUTO_MERGE_MINOR }}"; do
-  if ! grep -qxF -- "${want}" "${work}/wiring"; then
-    fail "the step is wired to both variables" "lacks '${want}'"
-  fi
-done
-want="          RENOVATE_PACKAGE_RULES: \${{ steps.automerge.outputs.package-rules }}"
-if ! grep -qxF -- "${want}" "${work}/renovate-step"; then
-  fail "Renovate gets the package rules" "lacks '${want}'"
+# Renovate step reads its output from, and nothing else: no "if:", no
+# "continue-on-error:".
+want_wiring="        id: automerge
+        env:
+          AUTO_MERGE_PATCH: \${{ vars.RENOVATE_AUTO_MERGE_PATCH }}
+          AUTO_MERGE_MINOR: \${{ vars.RENOVATE_AUTO_MERGE_MINOR }}"
+if [ "$(grep -v '^ *#' "${work}/wiring")" != "${want_wiring}" ]; then
+  fail "the step is wired to both variables and nothing else" "got:"$'\n'"$(cat "${work}/wiring")"
+else
+  echo "PASS the step is wired to both variables and nothing else"
 fi
+
+# The Renovate step gets the token, autodiscovery and the package rules,
+# and nothing else, such as RENOVATE_IGNORE_TESTS, RENOVATE_AUTOMERGE or
+# RENOVATE_PLATFORM_AUTOMERGE.
+want_renovate="        with:
+          token: \${{ steps.app-token.outputs.token }}
+        env:
+          RENOVATE_AUTODISCOVER: 'true'
+          RENOVATE_PACKAGE_RULES: \${{ steps.automerge.outputs.package-rules }}"
+if [ "$(cat "${work}/renovate-step")" != "${want_renovate}" ]; then
+  fail "the Renovate step has exactly the expected keys" "got:"$'\n'"$(cat "${work}/renovate-step")"
+else
+  echo "PASS the Renovate step has exactly the expected keys"
+fi
+
+# The step runs before Renovate, so its output exists when Renovate starts.
+step_line="$(grep -nxF "      - name: ${step_name}" "${workflow}" | cut -d: -f1)"
+renovate_line="$(grep -nxF "      - name: Self-hosted Renovate" "${workflow}" | cut -d: -f1)"
+if [ -z "${step_line}" ] || [ -z "${renovate_line}" ] || [ "${step_line}" -ge "${renovate_line}" ]; then
+  fail "the step runs before Renovate" "step at line '${step_line}', Renovate at line '${renovate_line}'"
+else
+  echo "PASS the step runs before Renovate"
+fi
+
 # A variable must never be expanded into the script text by the runner.
 if grep -qF "\${{" "${work}/step.sh"; then
   fail "the run block holds no expression" "found '\${{' in the run block"
+else
+  echo "PASS the run block holds no expression"
 fi
+
 # The header documents both variables, as AGENTS.md requires.
 for var in RENOVATE_AUTO_MERGE_PATCH RENOVATE_AUTO_MERGE_MINOR; do
   if ! sed -n '1,/^on:$/p' "${workflow}" | grep -q "^#   ${var}: "; then
     fail "the header documents ${var}" "no '#   ${var}: ' line above 'on:'"
+  else
+    echo "PASS the header documents ${var}"
   fi
 done
-if [ "${failures}" -eq 0 ]; then
-  echo "PASS the step is wired to both variables and to Renovate"
-fi
 
 # Off is the default: no variable at all, empty variables, and "false".
 run_case unset UNSET UNSET
@@ -188,7 +235,7 @@ run_case false false false
 expect_off false "false means off"
 
 # Only the exact string "true" is on.
-for value in TRUE True " true" "true " 1 yes on "'true'" '"true"'; do
+for value in TRUE True " true" "true " 1 yes on "'true'" '"true"' trueish; do
   run_case odd "${value}" "${value}"
   expect_off odd "the value '${value}' is off"
 done
@@ -242,11 +289,15 @@ if [ "${REAL_RENOVATE:-}" = "1" ]; then
     exit 1
   fi
 
-  # Resolves automerge for sample updates through renovate's own code:
-  # the env parser reads RENOVATE_PACKAGE_RULES into the global config,
-  # the repository config is resolved with its presets and merged over
-  # it, the way renovate's "mergeRenovateConfig" does, and
-  # "applyPackageRules" decides each update.
+  # Resolves sample updates through renovate's own code: the env parser
+  # reads RENOVATE_PACKAGE_RULES into the global config, the repository
+  # config is resolved with its presets and merged over it, the way
+  # renovate's "mergeRenovateConfig" does, and each update goes through
+  # "applyPackageRules", the config of its update type, and
+  # "applyPackageRules" again, the way renovate's "flattenUpdates" does.
+  # Prints "merge <type> <manager> <name>" for every update that gets
+  # automerge, and "age <manager> <name> <minimumReleaseAge>" for every
+  # patch update.
   cat >"${work}/resolve.mjs" <<'EOF'
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -267,50 +318,59 @@ delete globalConfig.hostRules;
 const repo = JSON.parse(readFileSync(repoFile, 'utf8'));
 const { config: repoResolved } = await resolveConfigPresets(repo);
 const merged = mergeChildConfig(mergeChildConfig(getDefaults(), globalConfig), repoResolved);
+const updateTypes = ['major', 'minor', 'patch', 'pin', 'digest', 'pinDigest',
+  'lockFileMaintenance', 'rollback', 'bump', 'replacement'];
 
 const samples = [
-  ['npm', 'left-pad', 'patch'],
-  ['npm', 'left-pad', 'minor'],
-  ['npm', 'left-pad', 'major'],
-  ['npm', 'left-pad', 'digest'],
-  ['npm', 'left-pad', 'pinDigest'],
-  ['npm', 'left-pad', 'pin'],
-  ['npm', 'left-pad', 'lockFileMaintenance'],
-  ['github-actions', 'actions/checkout', 'patch'],
-  ['github-actions', 'actions/checkout', 'major'],
-  ['gomod', 'golang.org/x/net', 'digest'],
-  ['github-actions', 'ostendorf-cloud/workflows', 'patch'],
-  ['npm', '@ostendorf-cloud/kit', 'patch'],
-  ['gomod', 'github.com/ostendorf-cloud/kit', 'minor'],
-  ['docker', 'ghcr.io/ostendorf-cloud/kit', 'digest'],
+  ['npm', 'left-pad', ['patch', 'minor', 'major', 'digest', 'pinDigest', 'pin', 'lockFileMaintenance']],
+  ['github-actions', 'actions/checkout', ['patch', 'minor', 'major', 'digest', 'pinDigest']],
+  ['docker', 'node', ['patch', 'digest']],
+  ['gomod', 'golang.org/x/net', ['digest']],
+  ['github-actions', 'ostendorf-cloud/workflows', ['patch', 'digest']],
+  ['github-actions', 'ostendorf-cloud/release-me/action', ['patch']],
+  ['npm', '@ostendorf-cloud/kit', ['patch']],
+  ['gomod', 'github.com/ostendorf-cloud/kit', ['minor']],
+  ['docker', 'ghcr.io/ostendorf-cloud/kit', ['digest']],
+  ['terraform', 'https://github.com/ostendorf-cloud/kit', ['patch']],
+  ['terraform', 'git::https://github.com/ostendorf-cloud/kit', ['patch']],
 ];
-for (const [manager, name, updateType] of samples) {
-  const out = await applyPackageRules({
-    ...merged, manager, depName: name, packageName: name, updateType,
-  });
-  if (out.automerge === true) console.log(`${updateType} ${manager} ${name}`);
+for (const [manager, name, types] of samples) {
+  for (const updateType of types) {
+    let c = { ...merged, manager, depName: name, packageName: name, updateType };
+    c = await applyPackageRules(c, 'datasource-merge');
+    c = mergeChildConfig(c, c[updateType]);
+    for (const t of updateTypes) delete c[t];
+    c = await applyPackageRules(c, 'update-type-merge');
+    if (c.automerge === true) console.log(`merge ${updateType} ${manager} ${name}`);
+    if (updateType === 'patch') console.log(`age ${manager} ${name} ${c.minimumReleaseAge ?? 'none'}`);
+  }
 }
 EOF
 
-  # resolve <name> <repo config file>: prints every sample update that
-  # gets automerge, one per line, sorted, for the rules of case <name>.
+  # resolve <name> <repo config file>: prints the resolver's lines for the
+  # rules of case <name>, sorted.
   resolve() {
     RULES="$(cat "${work}/rules-$1")" LOG_LEVEL=fatal \
       node "${work}/resolve.mjs" "${dist}" "$2" 2>/dev/null | sort
   }
 
-  # expect_resolved <name> <description> <repo config file> <want lines>
+  # expect_resolved <name> <description> <repo config file> <want merge lines>
   expect_resolved() {
     local got
     if ! got="$(resolve "$1" "$3")"; then
       fail "$2" "renovate could not resolve the config"
       return
     fi
+    got="$(grep '^merge ' <<<"${got}" || true)"
     if [ "${got}" != "$4" ]; then
       fail "$2" "automerge resolved for:"$'\n'"${got}"$'\n'"want:"$'\n'"$4"
     else
       echo "PASS $2"
     fi
+  }
+
+  lines() {
+    printf '%s\n' "$@" | sort
   }
 
   for name in patch both minor; do
@@ -323,23 +383,48 @@ EOF
     fi
   done
 
-  preset="${repo_dir}/default.json"
+  patch_want="$(lines \
+    "merge patch github-actions actions/checkout" \
+    "merge patch npm left-pad" \
+    "merge pinDigest github-actions actions/checkout" \
+    "merge pinDigest npm left-pad" \
+    "merge patch docker node")"
+  minor_want="$(lines \
+    "merge digest docker node" \
+    "merge digest gomod golang.org/x/net" \
+    "merge digest npm left-pad" \
+    "merge minor github-actions actions/checkout" \
+    "merge minor npm left-pad" \
+    "merge patch docker node" \
+    "merge patch github-actions actions/checkout" \
+    "merge patch npm left-pad" \
+    "merge pinDigest github-actions actions/checkout" \
+    "merge pinDigest npm left-pad")"
+
   expect_resolved unset "off: nothing automerges under default.json" "${preset}" ""
-  expect_resolved patch "patch: only third party patch and pinDigest automerge" "${preset}" \
-    "$(printf '%s\n' \
-      "patch github-actions actions/checkout" \
-      "patch npm left-pad" \
-      "pinDigest npm left-pad" | sort)"
-  minor_want="$(printf '%s\n' \
-    "digest gomod golang.org/x/net" \
-    "digest npm left-pad" \
-    "minor npm left-pad" \
-    "patch github-actions actions/checkout" \
-    "patch npm left-pad" \
-    "pinDigest npm left-pad" | sort)"
-  expect_resolved both "patch and minor: third party patch, minor and digest automerge" \
+  expect_resolved patch "patch: third party patch and pinDigest automerge" "${preset}" "${patch_want}"
+  expect_resolved both "patch and minor: third party patch, minor and digest automerge, no GitHub Actions digest" \
     "${preset}" "${minor_want}"
   expect_resolved minor "minor alone: the same as patch and minor" "${preset}" "${minor_want}"
+
+  # The release age floor of the preset: three days for GitHub Actions,
+  # none for the first party workflow reference, two days for npm, none
+  # for other managers. It applies with the switches off too.
+  got_age="$(resolve unset "${preset}" | grep '^age ' || true)"
+  want_age="$(lines \
+    "age docker node none" \
+    "age github-actions actions/checkout 3 days" \
+    "age github-actions ostendorf-cloud/release-me/action 3 days" \
+    "age github-actions ostendorf-cloud/workflows none" \
+    "age npm @ostendorf-cloud/kit 2 days" \
+    "age npm left-pad 2 days" \
+    "age terraform git::https://github.com/ostendorf-cloud/kit none" \
+    "age terraform https://github.com/ostendorf-cloud/kit none")"
+  if [ "${got_age}" != "${want_age}" ]; then
+    fail "the preset sets the release age floor" "got:"$'\n'"${got_age}"$'\n'"want:"$'\n'"${want_age}"
+  else
+    echo "PASS the preset sets the release age floor"
+  fi
 
   # A repository's own package rule comes after the global ones and wins.
   jq '.packageRules += [{"matchPackageNames": ["*"], "automerge": false}]' \
@@ -349,11 +434,22 @@ EOF
   # A top level "automerge": false does not veto: package rules apply on
   # top of it. The README says so.
   jq '. + {"automerge": false}' "${preset}" >"${work}/top-level.json"
-  expect_resolved patch "a top level automerge false does not veto" "${work}/top-level.json" \
-    "$(printf '%s\n' \
-      "patch github-actions actions/checkout" \
-      "patch npm left-pad" \
-      "pinDigest npm left-pad" | sort)"
+  expect_resolved both "a top level automerge false does not veto" "${work}/top-level.json" "${minor_want}"
+
+  # Neither does "patch": {"automerge": false}: renovate applies the
+  # package rules again after the update type's own config.
+  jq '. + {"patch": {"automerge": false}}' "${preset}" >"${work}/top-patch.json"
+  expect_resolved patch "a top level patch automerge false does not veto" "${work}/top-patch.json" \
+    "${patch_want}"
+
+  # A repository's own rule can still merge majors: the switches never
+  # merge them, the repository can.
+  jq '.packageRules += [{"matchUpdateTypes": ["major"], "automerge": true}]' \
+    "${preset}" >"${work}/repo-major.json"
+  expect_resolved patch "a repository rule merges majors by itself" "${work}/repo-major.json" \
+    "$(lines "${patch_want}" \
+      "merge major github-actions actions/checkout" \
+      "merge major npm left-pad")"
 fi
 
 if [ "${failures}" -ne 0 ]; then

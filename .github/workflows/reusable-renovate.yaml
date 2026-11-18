@@ -72,8 +72,13 @@ name: reusable-renovate
 #
 #   Major updates never merge by themselves through these switches, and
 #   neither do pin, lockFileMaintenance, rollback, bump, replacement and
-#   lockfileUpdate updates. Nothing under ostendorf-cloud merges by
-#   itself either: a first party release always needs a human. With both
+#   lockfileUpdate updates. A GitHub Actions digest update never merges
+#   through them either, whatever the switches say: for an action pinned
+#   by digest with a version comment it means the tag moved to another
+#   commit, the pattern of a compromised action. Nothing under
+#   ostendorf-cloud merges through them: a first party release always
+#   needs a human. A repository's own package rules can still merge any
+#   of these. With both
 #   switches off, the step "Build the automerge package rules" below
 #   emits nothing and Renovate runs exactly as before.
 #
@@ -95,8 +100,10 @@ name: reusable-renovate
 #   matching rule in order.
 #
 #   Automerge waits for green checks. Renovate itself merges only when
-#   every status check and check run on the branch has passed, and not
-#   while none exist. With "Allow auto-merge" on in the repository, it
+#   no status check and no check run on the branch failed or is still
+#   running, and not while none exist. A skipped or neutral check run
+#   counts as passed, so a path filtered workflow does not gate an update
+#   outside its paths. With "Allow auto-merge" on in the repository, it
 #   also turns on GitHub's own auto-merge (platformAutomerge, default on),
 #   which merges once the REQUIRED checks pass. Required checks come from
 #   branch protection, which lives in the infrastructure repository. Turn
@@ -331,17 +338,22 @@ jobs:
           patch_rule+='"matchUpdateTypes":["patch","pinDigest"],"automerge":true}'
           minor_rule='{"description":"Automerge minor and digest updates once the checks are green.",'
           minor_rule+='"matchUpdateTypes":["minor","digest"],"automerge":true}'
+          actions_digest_rule='{"description":"A GitHub Actions digest update means the tag moved.'
+          actions_digest_rule+=' It never merges by itself.",'
+          actions_digest_rule+='"matchManagers":["github-actions"],"matchUpdateTypes":["digest"],"automerge":false}'
           first_party_rule='{"description":"First party packages never merge by themselves.",'
           first_party_rule+='"matchPackageNames":["ostendorf-cloud/**","@ostendorf-cloud/**",'
-          first_party_rule+='"github.com/ostendorf-cloud/**","ghcr.io/ostendorf-cloud/**"],'
+          first_party_rule+='"github.com/ostendorf-cloud/**","ghcr.io/ostendorf-cloud/**",'
+          first_party_rule+='"https://github.com/ostendorf-cloud/**",'
+          first_party_rule+='"git::https://github.com/ostendorf-cloud/**"],'
           first_party_rule+='"automerge":false}'
 
           rules="${patch_rule}"
           if [ "${minor}" = "true" ]; then
             rules="${rules},${minor_rule}"
           fi
-          # Last, so it wins over the rules above.
-          rules="[${rules},${first_party_rule}]"
+          # After the switch rules, so they win over them.
+          rules="[${rules},${actions_digest_rule},${first_party_rule}]"
           echo "package-rules=${rules}" >>"${GITHUB_OUTPUT}"
 
       - name: Self-hosted Renovate
