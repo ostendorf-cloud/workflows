@@ -10,6 +10,9 @@ shellcheck = "0"
 # jq parses the pull request commit JSON scripts/check-dco.sh reads, and
 # builds the check run payload .github/workflows/reusable-dco.yaml posts.
 jq = "1"
+# yq reads the composite action and the README caller snippet in
+# scripts/pnpm-release-age-comment-action_test.sh.
+yq = "4.53.2"
 # addlicense has no short name in the mise registry. It is the one entry here
 # that needs the explicit aqua backend prefix to resolve.
 "aqua:google/addlicense" = "1.2.0"
