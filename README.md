@@ -96,7 +96,7 @@ Available and planned workflows:
   ```yaml
   on:
     schedule:
-      - cron: "17 3 * * *" # an example schedule; pick any cron that fits your repository
+      - cron: "17 * * * *" # hourly; pick your own minute so repositories do not all run at once
     workflow_dispatch:
     issues:
       types: [edited]
@@ -108,6 +108,9 @@ Available and planned workflows:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@v0.3.0
       secrets: inherit
   ```
+
+  Run it hourly: automerge needs a Renovate run after the checks are green, and a run is skipped
+  for the bot's own edits.
 
 - License-header check (`reusable-license.yaml`): runs `addlicense -check` over the files a
   caller selects and fails when one lacks a header. It never adds or rewrites a header.
