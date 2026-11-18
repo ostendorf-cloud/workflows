@@ -1,0 +1,56 @@
+# Explains a failed pnpm install on the pull request when pnpm refused a locked package
+# that is younger than its minimumReleaseAge. One comment per pull request, updated in
+# place on a rerun. Any other failure leaves no comment.
+#
+# Call it from a job of its own that runs after the install job, with
+# "pull-requests: write", never from the install job itself. The install job runs code of
+# the pull request and keeps "contents: read" only. README.md shows the full caller.
+#
+# Inputs:
+#   github-token   required, pass "${{ github.token }}". The earlier comment is found by
+#                  the author github-actions[bot], so another token posts a new comment
+#                  on every run.
+#   artifact-name  required, the artifact the install job uploaded its log as, for
+#                  example "install-log-${{ github.run_attempt }}".
+#   log-file       optional, the file name of the log inside the artifact, default
+#                  "install.log".
+# Secrets: none, the token comes in as an input.
+name: pnpm release age comment
+description: Explain a pnpm minimumReleaseAge install failure on the pull request.
+
+inputs:
+  github-token:
+    description: The workflow token of the comment job, "github.token", with pull-requests write.
+    required: true
+  artifact-name:
+    description: The artifact that holds the install log of the same run attempt.
+    required: true
+  log-file:
+    description: The file name of the install log inside the artifact.
+    required: false
+    default: install.log
+
+runs:
+  using: composite
+  steps:
+    # A fork pull request has no write token, and any other event has no pull request.
+    - name: Download the install log
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+      # No log, for example after a failed setup step, means no comment.
+      continue-on-error: true
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/pnpm-release-age-log
+
+    # The log is data from a job that ran untrusted code. The script reads only strictly
+    # matched text from it. The token reaches this one step only.
+    - name: Explain a minimum release age failure on the pull request
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        LOG_FILE: ${{ inputs.log-file }}
+      run: bash "$GITHUB_ACTION_PATH/release-age-comment.sh" "$RUNNER_TEMP/pnpm-release-age-log/$LOG_FILE"

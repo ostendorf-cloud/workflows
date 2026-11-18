@@ -28,21 +28,23 @@ tasks:
       - gitleaks git --no-banner --redact
 
   lint:shell:
-    desc: Shell script lint for this repository's own CI scripts
+    desc: Shell script lint for this repository's CI scripts and the scripts of its actions
     cmds:
-      - shellcheck scripts/*.sh
+      - shellcheck scripts/*.sh .github/actions/*/*.sh
 
   lint:license:
     desc: License header check for every shell script
     cmds:
-      - addlicense -check -c "Simon Ostendorf" -y 2026 -l apache -s=only scripts/*.sh
+      - addlicense -check -c "Simon Ostendorf" -y 2026 -l apache -s=only scripts/*.sh .github/actions/*/*.sh
 
   test:shell:
-    desc: Shell script tests for this repository's own CI scripts
+    desc: Shell script tests for this repository's CI scripts and the scripts of its actions
     cmds:
       - scripts/check-dco_test.sh
       - scripts/reusable-license_test.sh
       - scripts/reusable-renovate-config_test.sh
+      - scripts/pnpm-release-age-comment_test.sh
+      - scripts/pnpm-release-age-comment-action_test.sh
 
   check:
     desc: Every check, one after another

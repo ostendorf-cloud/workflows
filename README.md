@@ -6,6 +6,7 @@ Shared, reusable GitHub Actions workflows for the `ostendorf-cloud` organisation
 
 Each workflow in `.github/workflows/` is a `workflow_call` reusable workflow a repository in
 this organisation references by tag, instead of copying the same job into every repository.
+Each directory in `.github/actions/` is a composite action, referenced the same way.
 
 ## Use
 
@@ -142,6 +143,104 @@ Available and planned workflows:
   ```
 
 - CodeQL scanning: planned, tracked by its own issue.
+
+## pnpm release age comment
+
+pnpm 11 and later refuse a locked package that is younger than `minimumReleaseAge`. An install
+with `--frozen-lockfile` then fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`, and only the
+log says why. The composite action `.github/actions/pnpm-release-age-comment` explains that
+failure on the pull request.
+
+- It posts one comment per pull request and updates it in place on a rerun.
+- The comment lists each refused `name@version` with its publication time, the cutoff of the
+  failed run, a rerun hint and a link to the run.
+- Any other install failure, a missing log, another event or a fork pull request leaves no
+  comment.
+- pnpm 11 and later raise this error. The action reacts to it only.
+- The pnpm policy stays as it is. The action changes no setting and adds no exclude.
+
+The caller keeps two jobs in its own workflow, so the token boundary stays visible there:
+
+- The install job runs code of the pull request. It has `contents: read` only, keeps no
+  checkout credential and names no token. On failure it uploads its log as an artifact.
+- The comment job runs on a fresh runner with `pull-requests: write`. It checks out nothing. Its
+  only step is the action, which downloads the log and passes the token to its script step
+  alone.
+- The log is data. Only package names of at most 214 characters, versions of at most 64
+  characters and strict timestamps reach the comment, in backticks, at most 50 entries, the rest
+  counted.
+- The earlier comment is found by the author `github-actions[bot]` and a body that starts with
+  the marker `<!-- pnpm-release-age -->`. Pass `${{ github.token }}`, or every run posts a new comment.
+- The artifact name carries `github.run_attempt`, so a rerun never reads an older log.
+- `set -o pipefail` is required in the install step. Without a `shell` key a step runs as
+  `bash -e {0}`, and the job would take the exit code of `tee` instead of the install.
+
+```yaml
+name: checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d  # v5.2.9
+      - name: Install the dependencies and keep the log
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/install.log"
+      - name: Keep the install log for the comment job
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: install-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/install.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+  release-age-comment:
+    needs: install
+    if: >-
+      ${{ always() && needs.install.result == 'failure'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    # Two quick reruns must not both create the comment.
+    concurrency:
+      group: release-age-comment-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: ostendorf-cloud/workflows/.github/actions/pnpm-release-age-comment@v0
+        with:
+          github-token: ${{ github.token }}
+          artifact-name: install-log-${{ github.run_attempt }}
+```
+
+- Never call the action from the install job, and never give the install job
+  `pull-requests: write`. The install runs code of the pull request, which would then share a
+  runner with a token that can write to the pull request.
+- Replace the install command with the repository's own, for example `task web:deps`. Keep
+  `set -o pipefail`, the `2>&1` and the `tee` into `$RUNNER_TEMP/install.log`.
+- `log-file` names the log inside the artifact when it is not `install.log`.
+- `jdx/mise-action` uses the job's read only token for tool downloads by default and does not
+  persist it. Drop the step if the runner already has pnpm.
+- A pull request opened by Dependabot runs with a read only `GITHUB_TOKEN` by default. GitHub
+  documents that the `permissions` key raises it, so the comment job's `pull-requests: write`
+  should apply there too. This is not tested yet.
+- The action is referenced by the floating tag `@v0`, like the reusable workflows. It needs a
+  release of this repository before `@v0` contains it.
 
 ## Renovate preset
 

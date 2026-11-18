@@ -8,6 +8,10 @@ rules apply and are not repeated here.
 - `.github/workflows/<name>.yaml`: one reusable workflow per file, each independently callable
   through `workflow_call`. A consuming repository references one as
   `uses: ostendorf-cloud/workflows/.github/workflows/<name>.yaml@<tag>`.
+- `.github/actions/<name>/action.yaml`: one composite action per directory, for a step that
+  must run inside the caller's own job, such as a comment step whose token boundary the caller
+  sets. Its scripts sit next to it and are found through `$GITHUB_ACTION_PATH`. A consuming
+  repository references one as `uses: ostendorf-cloud/workflows/.github/actions/<name>@<tag>`.
 - `default.json`: a published Renovate preset for every repository in this organisation, pinned
   by the same kind of tag as a reusable workflow. It is not this repository's own Renovate
   configuration; that stays in `renovate.json`.
@@ -33,11 +37,12 @@ task --list          # one target per check
   function signature.
 - Actions are pinned by digest with a trailing `# vX.Y.Z` comment, exactly like every other
   repository in this organisation.
+- Every composite action documents its inputs in a header comment above `name:`.
 - License header (Apache-2.0, "Copyright 2026 Simon Ostendorf") on every shell script under
-  `scripts/`, checked by `lint:license`. The workflow YAML files do not carry a header comment:
-  YAML has no clean, idiomatic header-comment-block convention matching the Go and shell pattern
-  this organisation uses elsewhere, and none of `release-me`, `web-kit` or `skills` put a license
-  header on their own `.yaml`/`.yml` workflow files either.
+  `scripts/` and `.github/actions/`, checked by `lint:license`. The workflow YAML files do not
+  carry a header comment: YAML has no clean, idiomatic header-comment-block convention matching
+  the Go and shell pattern this organisation uses elsewhere, and none of `release-me`, `web-kit`
+  or `skills` put a license header on their own `.yaml`/`.yml` workflow files either.
 
 ## Deviations
 
