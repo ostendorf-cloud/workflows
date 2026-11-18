@@ -170,8 +170,10 @@ The caller keeps two jobs in its own workflow, so the token boundary stays visib
 - The log is data. Only package names of at most 214 characters, versions of at most 64
   characters and strict timestamps reach the comment, in backticks, at most 50 entries, the rest
   counted.
-- The earlier comment is found by the author `github-actions[bot]` and a body that starts with
-  the marker `<!-- pnpm-release-age -->`. Pass `${{ github.token }}`, or every run posts a new comment.
+- The earlier comment is found by its author and a body that starts with the marker
+  `<!-- pnpm-release-age -->`. The author is `comment-author`, default `github-actions[bot]`.
+  It must match the token, or every run posts a new comment. A comment of anyone else is never
+  edited.
 - The artifact name carries `github.run_attempt`, so a rerun never reads an older log.
 - `set -o pipefail` is required in the install step. Without a `shell` key a step runs as
   `bash -e {0}`, and the job would take the exit code of `tee` instead of the install.
@@ -242,6 +244,90 @@ jobs:
   should apply there too. This is not tested yet.
 - The action is referenced by the floating tag `@v0`, like the reusable workflows. It needs a
   release of this repository before `@v0` contains it.
+
+### Post as the dependencies app
+
+The comment can appear as the organisation's dependencies app, like the other Renovate
+comments. This variant is optional. Without it the action keeps `github.token` and the author
+`github-actions[bot]`.
+
+- The comment job mints a token for the app with `actions/create-github-app-token`, the same
+  pinned version as `reusable-renovate.yaml`.
+- The token has `pull-requests: write` and no other permission. Without `owner` and
+  `repositories` it is scoped to the calling repository only.
+- `comment-author` is `ostendorf-cloud-dependencies[bot]`, the login of the app's comments.
+- The private key is then readable by the comment job only. That job checks out nothing and runs
+  no code of the pull request. The install job is separate and names no secret and no token.
+- The secret is not available to a fork pull request. The comment job is skipped there anyway.
+- When `GH_APP_DEPENDENCIES_PRIVATE_KEY` is an organisation secret, its visibility must include
+  the repository. `GH_APP_DEPENDENCIES_APP_ID` is an organisation variable.
+
+Only the comment job changes. The install job stays exactly as above.
+
+```yaml
+name: checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d  # v5.2.9
+      - name: Install the dependencies and keep the log
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/install.log"
+      - name: Keep the install log for the comment job
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: install-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/install.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+  release-age-comment:
+    needs: install
+    if: >-
+      ${{ always() && needs.install.result == 'failure'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    # Two quick reruns must not both create the comment.
+    concurrency:
+      group: release-age-comment-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      # No owner and no repositories: the token is scoped to this repository only.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        id: app-token
+        with:
+          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
+          private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
+          permission-pull-requests: write
+      - uses: ostendorf-cloud/workflows/.github/actions/pnpm-release-age-comment@v0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          comment-author: ostendorf-cloud-dependencies[bot]
+          artifact-name: install-log-${{ github.run_attempt }}
+```
+
+- `actions/create-github-app-token` v3.3.0 marks `app-id` as deprecated in favour of
+  `client-id`. The snippet keeps `app-id` and the existing variable, like
+  `reusable-renovate.yaml`.
 
 ## Renovate preset
 

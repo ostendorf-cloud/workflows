@@ -4,8 +4,9 @@
 #
 # Tests for .github/actions/pnpm-release-age-comment/release-age-comment.sh and for the
 # install step of the caller snippet in README.md. A stub gh first on PATH records every
-# call and applies a --jq expression with the real jq to a fixture comment list, so no
-# network is used.
+# call and prints a fixture comment list for the list call, or applies a --jq expression
+# to it with the real jq, so no network is used. A jq wrapper first on PATH records every
+# argument of each jq call and then runs the real jq.
 #
 # Environment: RELEASE_AGE_SCRIPT and RELEASE_AGE_README override the files under test.
 set -uo pipefail
@@ -16,6 +17,9 @@ readme=${RELEASE_AGE_README:-$here/../README.md}
 # An explicit template, because macOS mktemp ignores TMPDIR without one.
 work=$(mktemp -d "${TMPDIR:-/tmp}/pnpm-release-age-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+
+REAL_JQ=$(command -v jq)
+export REAL_JQ
 
 mkdir -p "$work/bin"
 cat >"$work/bin/gh" <<'STUB'
@@ -32,12 +36,31 @@ for a in "$@"; do
   fi
   prev=$a
 done
-if [[ -n $expr && -f $STUB_DIR/comments.json ]]; then
-  jq -r "$expr" "$STUB_DIR/comments.json"
+if [[ -n $expr ]]; then
+  printf '%s\n' "$expr" >>"$STUB_DIR/jq_args"
+  if [[ -f $STUB_DIR/comments.json ]]; then
+    "$REAL_JQ" -r "$expr" "$STUB_DIR/comments.json"
+  fi
+elif [[ $* == *--paginate* ]]; then
+  # gh prints each page as a JSON array of its own: two pages show that the filter reads
+  # a stream of arrays.
+  if [[ -f $STUB_DIR/comments.json ]]; then
+    "$REAL_JQ" -c '.[:1]' "$STUB_DIR/comments.json"
+    "$REAL_JQ" -c '.[1:]' "$STUB_DIR/comments.json"
+  else
+    printf '[]\n'
+  fi
 fi
 exit 0
 STUB
 chmod +x "$work/bin/gh"
+
+cat >"$work/bin/jq" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >>"$STUB_DIR/jq_args"
+exec "$REAL_JQ" "$@"
+STUB
+chmod +x "$work/bin/jq"
 
 fails=0
 checks=0
@@ -57,7 +80,8 @@ body_has() { grep -qF -- "$1" "$STUB_DIR/body"; }
 body_lacks() { ! grep -qF -- "$1" "$STUB_DIR/body"; }
 call_count() { wc -l <"$STUB_DIR/calls" | tr -d ' '; }
 
-# run_case LOG_CONTENT [COMMENTS_JSON]: runs the script on a fresh stub state.
+# run_case LOG_CONTENT [COMMENTS_JSON]: runs the script on a fresh stub state. COMMENT_AUTHOR
+# reaches the script only when CASE_AUTHOR is set, and stderr lands in $STUB_DIR/stderr.
 run_case() {
   STUB_DIR=$(mktemp -d "$work/case.XXXXXX")
   export STUB_DIR
@@ -65,14 +89,20 @@ run_case() {
   if [[ -n ${2:-} ]]; then
     printf '%s' "$2" >"$STUB_DIR/comments.json"
   fi
-  PATH="$work/bin:$PATH" REPO=o/r PR=7 GH_TOKEN=fake-token-for-tests GITHUB_SERVER_URL=https://github.com \
-    GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=99 \
-    bash "$script" "$STUB_DIR/install.log"
+  (
+    unset COMMENT_AUTHOR
+    if [[ -n ${CASE_AUTHOR+set} ]]; then
+      export COMMENT_AUTHOR=$CASE_AUTHOR
+    fi
+    PATH="$work/bin:$PATH" REPO=o/r PR=7 GH_TOKEN=fake-token-for-tests GITHUB_SERVER_URL=https://github.com \
+      GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=99 \
+      bash "$script" "$STUB_DIR/install.log" 2>"$STUB_DIR/stderr"
+  )
   status=$?
 }
 
 marker='<!-- pnpm-release-age -->'
-list_call='api --paginate repos/o/r/issues/7/comments --jq'
+list_call='api --paginate repos/o/r/issues/7/comments'
 
 # 1. The real pnpm 12 failure of a pull request, no earlier comment: list, then one POST.
 real_log='Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION
@@ -136,7 +166,7 @@ assert no_post
 assert test "$(call_count)" -eq 2
 
 # 6. The list call asks for the comments of the pull request.
-assert grep -qF "$list_call" "$STUB_DIR/calls"
+assert grep -qxF "$list_call" "$STUB_DIR/calls"
 
 # 7. Several comments: a human copy of the marker and a bot comment without it are never
 # touched, and the oldest of two bot comments with the marker is the one updated.
@@ -157,6 +187,99 @@ middle='{"id":5,"user":{"login":"github-actions[bot]"},"body":"quoted: <!-- pnpm
 run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$middle]"
 assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
 assert no_patch
+
+# 7b. COMMENT_AUTHOR names the author of the earlier comment, for example a GitHub App.
+# Only a comment of that author that starts with the marker is updated. A comment of
+# github-actions[bot], a human comment and a user named like the app, each with the
+# marker, are never edited.
+fail_log='Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n'
+app='ostendorf-cloud-dependencies[bot]'
+app_old='{"id":8,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"<!-- pnpm-release-age -->\\nfirst"}'
+app_new='{"id":9,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"<!-- pnpm-release-age -->\\nsecond"}'
+app_other='{"id":10,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"a different app comment"}'
+lookalike='{"id":11,"user":{"login":"ostendorf-cloud-dependencies"},"body":"<!-- pnpm-release-age -->\\ncopied"}'
+
+# filter_lacks VALUE: no jq program of the run contains VALUE, so the author is data.
+filter_lacks() { ! grep -F 'select(' "$STUB_DIR/jq_args" | grep -qF -- "$1"; }
+# arg_given VALUE: VALUE reached jq as an argument of its own, as with --arg.
+arg_given() { grep -qxF -- "$1" "$STUB_DIR/jq_args"; }
+
+CASE_AUTHOR=$app run_case "$fail_log" "[$human,$lookalike,$older,$app_other,$app_old,$app_new]"
+assert test "$status" -eq 0
+assert grep -qF 'api -X PATCH repos/o/r/issues/comments/8 -F body=@' "$STUB_DIR/calls"
+assert no_post
+assert test "$(call_count)" -eq 2
+assert arg_given "$app"
+assert filter_lacks "$app"
+assert filter_lacks 'github-actions'
+# The page with the app comment may come after the first page.
+CASE_AUTHOR=$app run_case "$fail_log" "[$older,$app_old]"
+assert grep -qF 'api -X PATCH repos/o/r/issues/comments/8 -F body=@' "$STUB_DIR/calls"
+# Only comments of other authors carry the marker: a new comment, nothing edited.
+CASE_AUTHOR=$app run_case "$fail_log" "[$human,$lookalike,$older,$app_other]"
+assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
+assert no_patch
+# Without COMMENT_AUTHOR, and with an empty one, the author is github-actions[bot] and a
+# comment of the app is never edited.
+run_case "$fail_log" "[$app_old,$human,$older]"
+assert test "$status" -eq 0
+assert grep -qF 'api -X PATCH repos/o/r/issues/comments/3 -F body=@' "$STUB_DIR/calls"
+assert test "$(call_count)" -eq 2
+assert arg_given 'github-actions[bot]'
+assert filter_lacks 'github-actions'
+run_case "$fail_log" "[$app_old,$human]"
+assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
+assert no_patch
+CASE_AUTHOR='' run_case "$fail_log" "[$app_old,$older]"
+assert test "$status" -eq 0
+assert grep -qF 'api -X PATCH repos/o/r/issues/comments/3 -F body=@' "$STUB_DIR/calls"
+# A plain user login is accepted as well.
+CASE_AUTHOR=someone run_case "$fail_log" "[$older,$human]"
+assert grep -qF 'api -X PATCH repos/o/r/issues/comments/1 -F body=@' "$STUB_DIR/calls"
+
+# 7c. COMMENT_AUTHOR must be a GitHub login or an app slug with "[bot]", at most 40
+# characters. Anything else fails with a message before any gh call, with or without a
+# release age failure in the log.
+rep40() { head -c "$1" /dev/zero | tr '\0' a; }
+CASE_AUTHOR="$(rep40 35)[bot]" run_case "$fail_log" "[$older]"
+assert test "$status" -eq 0
+assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
+CASE_AUTHOR=$(rep40 40) run_case "$fail_log"
+assert test "$status" -eq 0
+bad_authors=(
+  "$(rep40 36)[bot]"
+  "$(rep40 41)"
+  'a"b'
+  "a'b"
+  'a b'
+  'github-actions[bot] '
+  $'a\nb'
+  $'a\tb'
+  "a\$(id)"
+  "\$(id)"
+  "a\`id\`"
+  'a\b'
+  'a;b'
+  'a|b'
+  'a)'
+  '-leading'
+  '[bot]'
+  'a[bot'
+  'a[bot][bot]'
+  'a[BOT]'
+  'a.b'
+  'a/b'
+  'a_b'
+)
+for bad in "${bad_authors[@]}"; do
+  CASE_AUTHOR=$bad run_case "$fail_log" "[$older]"
+  assert test "$status" -ne 0
+  assert no_calls
+  assert grep -qF 'COMMENT_AUTHOR' "$STUB_DIR/stderr"
+done
+CASE_AUTHOR='a"b' run_case 'ERR_PNPM_FETCH_404 not found\n'
+assert test "$status" -ne 0
+assert no_calls
 
 # 8. Another failure: no gh call, exit 0.
 run_case 'ERR_PNPM_FETCH_404 not found\n'
