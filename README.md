@@ -175,6 +175,9 @@ The caller keeps two jobs in its own workflow, so the token boundary stays visib
   It must match the token, or every run posts a new comment. A comment of anyone else is never
   edited.
 - The artifact name carries `github.run_attempt`, so a rerun never reads an older log.
+- The comment job needs `gh` and `jq` on the runner. Both are installed on `ubuntu-latest`. A
+  runner without `jq` fails the step and posts nothing. A failed list call never posts a second
+  comment.
 - `set -o pipefail` is required in the install step. Without a `shell` key a step runs as
   `bash -e {0}`, and the job would take the exit code of `tee` instead of the install.
 
@@ -256,11 +259,27 @@ comments. This variant is optional. Without it the action keeps `github.token` a
 - The token has `pull-requests: write` and no other permission. Without `owner` and
   `repositories` it is scoped to the calling repository only.
 - `comment-author` is `ostendorf-cloud-dependencies[bot]`, the login of the app's comments.
-- The private key is then readable by the comment job only. That job checks out nothing and runs
-  no code of the pull request. The install job is separate and names no secret and no token.
+  `${{ steps.app-token.outputs.app-slug }}[bot]` gives the same login without hard coding it.
+- The private key is readable by every workflow of every branch of this repository, so by
+  everyone with write access. With it, any token the app installation allows can be minted for
+  any repository the app is installed on. `permission-pull-requests: write` limits only the
+  token of this step, never the key.
+- Every action in the comment job runs next to the key, like `renovatebot/github-action` in
+  `reusable-renovate.yaml`. The supply chain trust is the same.
+- Use this variant only where the owner alone has write access and the secret's visibility
+  already includes the repository for Renovate. Otherwise keep the default variant with
+  `github.token`.
+- The install job names no secret and no token. That is the real boundary against the code of
+  the pull request, such as pnpm lifecycle scripts.
 - The secret is not available to a fork pull request. The comment job is skipped there anyway.
+- A Dependabot pull request gets no Actions secrets, so the token step fails there. Renovate is
+  the only dependency bot in this organisation.
+- Switching the identity on an open pull request leaves the old comment. The new identity posts
+  a second one.
 - When `GH_APP_DEPENDENCIES_PRIVATE_KEY` is an organisation secret, its visibility must include
   the repository. `GH_APP_DEPENDENCIES_APP_ID` is an organisation variable.
+- A stronger design is not built here: a `workflow_run` comment workflow on the default branch,
+  with the key in an environment limited to `main`.
 
 Only the comment job changes. The install job stays exactly as above.
 

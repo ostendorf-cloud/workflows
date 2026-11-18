@@ -42,6 +42,19 @@ if [[ -n $expr ]]; then
     "$REAL_JQ" -r "$expr" "$STUB_DIR/comments.json"
   fi
 elif [[ $* == *--paginate* ]]; then
+  # LIST_MODE fail: the first page, then an API error. LIST_MODE html: a page that is not
+  # JSON, with exit 0.
+  case ${LIST_MODE:-} in
+    fail)
+      "$REAL_JQ" -c '.[:1]' "$STUB_DIR/comments.json"
+      echo 'gh: HTTP 502' >&2
+      exit 1
+      ;;
+    html)
+      echo '<html>rate limited</html>'
+      exit 0
+      ;;
+  esac
   # gh prints each page as a JSON array of its own: two pages show that the filter reads
   # a stream of arrays.
   if [[ -f $STUB_DIR/comments.json ]]; then
@@ -61,6 +74,11 @@ printf '%s\n' "$@" >>"$STUB_DIR/jq_args"
 exec "$REAL_JQ" "$@"
 STUB
 chmod +x "$work/bin/jq"
+
+# A runner without jq: the shell answers 127.
+mkdir -p "$work/nojq"
+printf '#!/usr/bin/env bash\necho "jq: command not found" >&2\nexit 127\n' >"$work/nojq/jq"
+chmod +x "$work/nojq/jq"
 
 fails=0
 checks=0
@@ -82,6 +100,7 @@ call_count() { wc -l <"$STUB_DIR/calls" | tr -d ' '; }
 
 # run_case LOG_CONTENT [COMMENTS_JSON]: runs the script on a fresh stub state. COMMENT_AUTHOR
 # reaches the script only when CASE_AUTHOR is set, and stderr lands in $STUB_DIR/stderr.
+# CASE_LIST_MODE sets the LIST_MODE of the gh stub, CASE_NO_JQ puts a missing jq first.
 run_case() {
   STUB_DIR=$(mktemp -d "$work/case.XXXXXX")
   export STUB_DIR
@@ -90,11 +109,18 @@ run_case() {
     printf '%s' "$2" >"$STUB_DIR/comments.json"
   fi
   (
-    unset COMMENT_AUTHOR
+    unset COMMENT_AUTHOR LIST_MODE
     if [[ -n ${CASE_AUTHOR+set} ]]; then
       export COMMENT_AUTHOR=$CASE_AUTHOR
     fi
-    PATH="$work/bin:$PATH" REPO=o/r PR=7 GH_TOKEN=fake-token-for-tests GITHUB_SERVER_URL=https://github.com \
+    if [[ -n ${CASE_LIST_MODE:-} ]]; then
+      export LIST_MODE=$CASE_LIST_MODE
+    fi
+    path="$work/bin:$PATH"
+    if [[ -n ${CASE_NO_JQ:-} ]]; then
+      path="$work/nojq:$path"
+    fi
+    PATH=$path REPO=o/r PR=7 GH_TOKEN=fake-token-for-tests GITHUB_SERVER_URL=https://github.com \
       GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=99 \
       bash "$script" "$STUB_DIR/install.log" 2>"$STUB_DIR/stderr"
   )
@@ -159,7 +185,7 @@ run_case 'old@1.0.0 was published at 2026-01-01T00:00:00.000Z\nError: ERR_PNPM_M
 assert body_lacks 'old@1.0.0'
 
 # 5. An earlier comment of the bot exists: PATCH that comment, never a second POST.
-bot='{"id":4242,"user":{"login":"github-actions[bot]"},"body":"<!-- pnpm-release-age -->\\nold"}'
+bot='{"id":4242,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- pnpm-release-age -->\\nold"}'
 run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$bot]"
 assert grep -qF 'api -X PATCH repos/o/r/issues/comments/4242 -F body=@' "$STUB_DIR/calls"
 assert no_post
@@ -170,10 +196,10 @@ assert grep -qxF "$list_call" "$STUB_DIR/calls"
 
 # 7. Several comments: a human copy of the marker and a bot comment without it are never
 # touched, and the oldest of two bot comments with the marker is the one updated.
-human='{"id":1,"user":{"login":"someone"},"body":"<!-- pnpm-release-age -->\\ncopied"}'
-other='{"id":2,"user":{"login":"github-actions[bot]"},"body":"a different bot comment"}'
-older='{"id":3,"user":{"login":"github-actions[bot]"},"body":"<!-- pnpm-release-age -->\\nfirst"}'
-newer='{"id":4,"user":{"login":"github-actions[bot]"},"body":"<!-- pnpm-release-age -->\\nsecond"}'
+human='{"id":1,"user":{"login":"someone","type":"User"},"body":"<!-- pnpm-release-age -->\\ncopied"}'
+other='{"id":2,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"a different bot comment"}'
+older='{"id":3,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- pnpm-release-age -->\\nfirst"}'
+newer='{"id":4,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- pnpm-release-age -->\\nsecond"}'
 run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$human,$other,$older,$newer]"
 assert grep -qF 'api -X PATCH repos/o/r/issues/comments/3 -F body=@' "$STUB_DIR/calls"
 assert test "$(call_count)" -eq 2
@@ -183,7 +209,7 @@ assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/c
 assert no_patch
 # A bot comment must start with the marker. One that carries it later, for example a
 # quote, is never edited.
-middle='{"id":5,"user":{"login":"github-actions[bot]"},"body":"quoted: <!-- pnpm-release-age -->\\nold"}'
+middle='{"id":5,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"quoted: <!-- pnpm-release-age -->\\nold"}'
 run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$middle]"
 assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
 assert no_patch
@@ -194,10 +220,10 @@ assert no_patch
 # marker, are never edited.
 fail_log='Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n'
 app='ostendorf-cloud-dependencies[bot]'
-app_old='{"id":8,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"<!-- pnpm-release-age -->\\nfirst"}'
-app_new='{"id":9,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"<!-- pnpm-release-age -->\\nsecond"}'
-app_other='{"id":10,"user":{"login":"ostendorf-cloud-dependencies[bot]"},"body":"a different app comment"}'
-lookalike='{"id":11,"user":{"login":"ostendorf-cloud-dependencies"},"body":"<!-- pnpm-release-age -->\\ncopied"}'
+app_old='{"id":8,"user":{"login":"ostendorf-cloud-dependencies[bot]","type":"Bot"},"body":"<!-- pnpm-release-age -->\\nfirst"}'
+app_new='{"id":9,"user":{"login":"ostendorf-cloud-dependencies[bot]","type":"Bot"},"body":"<!-- pnpm-release-age -->\\nsecond"}'
+app_other='{"id":10,"user":{"login":"ostendorf-cloud-dependencies[bot]","type":"Bot"},"body":"a different app comment"}'
+lookalike='{"id":11,"user":{"login":"ostendorf-cloud-dependencies","type":"User"},"body":"<!-- pnpm-release-age -->\\ncopied"}'
 
 # filter_lacks VALUE: no jq program of the run contains VALUE, so the author is data.
 filter_lacks() { ! grep -F 'select(' "$STUB_DIR/jq_args" | grep -qF -- "$1"; }
@@ -236,6 +262,30 @@ assert grep -qF 'api -X PATCH repos/o/r/issues/comments/3 -F body=@' "$STUB_DIR/
 # A plain user login is accepted as well.
 CASE_AUTHOR=someone run_case "$fail_log" "[$older,$human]"
 assert grep -qF 'api -X PATCH repos/o/r/issues/comments/1 -F body=@' "$STUB_DIR/calls"
+
+# 7b2. A list call that fails never leads to a second comment or an edit: an API error
+# after one page, with or without a matching comment on it, a page that is not JSON, and a
+# runner without jq each fail the step with no POST and no PATCH.
+for comments in "[$older,$human]" "[$human,$older]"; do
+  CASE_LIST_MODE=fail run_case "$fail_log" "$comments"
+  assert test "$status" -ne 0
+  assert no_post
+  assert no_patch
+done
+CASE_LIST_MODE=fail CASE_AUTHOR=$app run_case "$fail_log" "[$app_old,$older]"
+assert test "$status" -ne 0
+assert no_post
+assert no_patch
+CASE_LIST_MODE=html run_case "$fail_log" "[$older]"
+assert test "$status" -ne 0
+assert no_post
+assert no_patch
+# The error of jq stays in the job log.
+assert test -s "$STUB_DIR/stderr"
+CASE_NO_JQ=1 run_case "$fail_log" "[$older]"
+assert test "$status" -eq 127
+assert no_post
+assert no_patch
 
 # 7c. COMMENT_AUTHOR must be a GitHub login or an app slug with "[bot]", at most 40
 # characters. Anything else fails with a message before any gh call, with or without a

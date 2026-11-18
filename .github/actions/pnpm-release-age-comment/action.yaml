@@ -6,6 +6,9 @@
 # "pull-requests: write", never from the install job itself. The install job runs code of
 # the pull request and keeps "contents: read" only. README.md shows the full caller.
 #
+# The runner needs gh and jq. Both are installed on ubuntu-latest. Without jq the script
+# step fails with 127 and posts nothing.
+#
 # Inputs:
 #   github-token   required, pass "${{ github.token }}", or a GitHub App token together
 #                  with comment-author. README.md shows both callers.
