@@ -35,8 +35,9 @@ fi
 # not found is left out.
 text=$(sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$log" | sed -n "/$code/,\$p" | tr '\n' ' ' | tr -s ' ')
 
-# The awk filter below drops a name longer than 214 characters, the npm limit.
-name_re='(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+@[0-9][A-Za-z0-9.+-]*'
+# The awk filter below drops a name longer than 214 characters, the npm limit. A version
+# is a digit and at most 63 more characters, so a longer one never matches.
+name_re='(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+@[0-9][A-Za-z0-9.+-]{0,63}'
 time_re='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z'
 
 all=$({ printf '%s\n' "$text" | grep -oE "$name_re was published at $time_re" || true; } |
@@ -82,9 +83,10 @@ trap 'rm -f "$body"' EXIT
 } >"$body"
 
 # Find the comment this script wrote earlier. The author check keeps a copied marker
-# in someone else's comment from being edited, and the first hit is the oldest.
+# in someone else's comment from being edited, the comment must start with the marker,
+# and the first hit is the oldest.
 id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-  --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" | sed -n '1p')
+  --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | sed -n '1p')
 
 if [[ -n $id ]]; then
   gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" >/dev/null

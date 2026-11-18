@@ -68,6 +68,8 @@ assert hex40 "$download.uses" "$a"
 # No log, for example after a failed setup step, means no comment.
 assert eq "$download.\"continue-on-error\"" true "$a"
 assert eq "$download.with.name" "\${{ inputs.artifact-name }}" "$a"
+# Exactly these keys: no "repository", no token, nothing that reaches another run.
+assert eq "$download.with | keys | sort | join(\",\")" name,path "$a"
 assert eq "$download.with.path" "\${{ runner.temp }}/pnpm-release-age-log" "$a"
 # The token is never handed to the download.
 assert lacks "$download | tojson" 'token' "$a"
@@ -77,6 +79,8 @@ assert eq "$script.shell" bash "$a"
 assert eq "$script.env.GH_TOKEN" "\${{ inputs.github-token }}" "$a"
 assert eq "$script.env.REPO" "\${{ github.repository }}" "$a"
 assert eq "$script.env.PR" "\${{ github.event.pull_request.number }}" "$a"
+assert eq "$script.env.LOG_FILE" "\${{ inputs.log-file }}" "$a"
+assert eq "$script.env | keys | sort | join(\",\")" GH_TOKEN,LOG_FILE,PR,REPO "$a"
 assert eq "$script.run" "bash \"\$GITHUB_ACTION_PATH/release-age-comment.sh\" \"\$RUNNER_TEMP/pnpm-release-age-log/\$LOG_FILE\"" "$a"
 # The token reaches one step only, and no expression is expanded inside a run block.
 assert eq '[.runs.steps[] | select(.env.GH_TOKEN != null)] | length' 1 "$a"
@@ -101,6 +105,7 @@ assert eq '.env' null "$c"
 assert eq '[.jobs[] | select(.permissions."pull-requests" == "write")] | length' 1 "$c"
 assert eq "$comment.permissions.\"pull-requests\"" write "$c"
 assert eq "$comment.permissions.contents" read "$c"
+assert eq "$comment.permissions | keys | sort | join(\",\")" contents,pull-requests "$c"
 assert eq "$deps.permissions | keys | join(\",\")" contents "$c"
 assert eq "$deps.permissions.contents" read "$c"
 
@@ -137,6 +142,18 @@ assert eq "[.jobs[] | tojson | select(test(\"github.token\"))] | length" 1 "$c"
 
 # The documented caller is a valid workflow.
 assert actionlint -no-color "$c"
+
+# The README warns right below the snippet never to merge the two jobs, and the action
+# header says the same.
+after_snippet=$(awk '
+  /^## pnpm release age comment$/ { in_section = 1; next }
+  in_section && /^## / { exit }
+  in_section && /^```yaml$/ { in_block = 1; next }
+  in_block && /^```$/ { in_block = 0; done = 1; next }
+  done && /^- / { print; exit }
+' "$readme")
+assert test "$after_snippet" = "- Never call the action from the install job, and never give the install job"
+assert grep -qF 'never from the install job itself' "$action"
 
 printf '%d checks, %d failed\n' "$checks" "$fails"
 [[ $fails -eq 0 ]]

@@ -151,6 +151,12 @@ assert test "$(call_count)" -eq 2
 run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$human,$other]"
 assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
 assert no_patch
+# A bot comment must start with the marker. One that carries it later, for example a
+# quote, is never edited.
+middle='{"id":5,"user":{"login":"github-actions[bot]"},"body":"quoted: <!-- pnpm-release-age -->\\nold"}'
+run_case 'Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION a@1.0.0\n' "[$middle]"
+assert grep -qF 'api -X POST repos/o/r/issues/7/comments -F body=@' "$STUB_DIR/calls"
+assert no_patch
 
 # 8. Another failure: no gh call, exit 0.
 run_case 'ERR_PNPM_FETCH_404 not found\n'
@@ -260,6 +266,36 @@ assert body_lacks "$(rep 20 b)"
 run_case "Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION\n  $(rep 20000 a)@1.0.0 was published at 2026-11-17T05:56:55.170Z, within the\n"
 assert body_lacks "$(rep 20 a)"
 assert test "$(wc -c <"$STUB_DIR/body")" -lt 2000
+
+# 15d. A version is at most 64 characters long: a digit and 63 more. A longer one is not
+# listed, and 50 entries with a 20000 character version keep the body small.
+run_case "Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION\n  v@1$(rep 63 0) was published at 2026-11-17T05:56:55.170Z, within the\n"
+assert body_has "- \`v@1$(rep 63 0)\`, published at"
+run_case "Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION\n  v@1$(rep 64 0) was published at 2026-11-17T05:56:55.170Z, within the\n"
+assert body_lacks "v@1$(rep 20 0)"
+long_version=$(rep 20000 9)
+huge='Error: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION\n'
+for i in $(seq 1 50); do
+  huge+="  big$i@$long_version was published at 2026-11-17T05:56:55.170Z, within the\n"
+done
+huge+='  ok@1.0.0 was published at 2026-11-17T05:56:55.170Z, within the\n'
+run_case "$huge"
+assert body_lacks "$(rep 20 9)"
+assert body_has "- \`ok@1.0.0\`, published at"
+assert test "$(grep -c '^- ' "$STUB_DIR/body")" -eq 1
+assert test "$(wc -c <"$STUB_DIR/body")" -lt 60000
+
+# 15e. A bold red colour code is stripped, a scope with a dot is a scope, and a version
+# that starts with a letter is not a version.
+run_case '\033[1;31mError: ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION\033[0m
+  \033[1;31mred@1.0.0\033[0m was published at 2026-11-17T05:56:55.170Z, within the
+  @my.scope/dotted@2.0.0 was published at 2026-11-17T05:56:55.170Z, within the
+  letter@v1.0.0 was published at 2026-11-17T05:56:55.170Z, within the
+'
+assert body_has "- \`red@1.0.0\`, published at"
+assert body_has "- \`@my.scope/dotted@2.0.0\`, published at"
+assert body_lacks 'letter@'
+assert test "$(grep -c '^- ' "$STUB_DIR/body")" -eq 2
 
 # 16. A missing REPO or PR fails before any gh call.
 STUB_DIR=$(mktemp -d "$work/case.XXXXXX")

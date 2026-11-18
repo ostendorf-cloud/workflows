@@ -156,7 +156,7 @@ failure on the pull request.
   failed run, a rerun hint and a link to the run.
 - Any other install failure, a missing log, another event or a fork pull request leaves no
   comment.
-- pnpm 10 and earlier never print this error, so the comment never appears there.
+- pnpm 11 and later raise this error. The action reacts to it only.
 - The pnpm policy stays as it is. The action changes no setting and adds no exclude.
 
 The caller keeps two jobs in its own workflow, so the token boundary stays visible there:
@@ -166,10 +166,11 @@ The caller keeps two jobs in its own workflow, so the token boundary stays visib
 - The comment job runs on a fresh runner with `pull-requests: write`. It checks out nothing. Its
   only step is the action, which downloads the log and passes the token to its script step
   alone.
-- The log is data. Only package names of at most 214 characters and strict timestamps reach the
-  comment, in backticks, at most 50 entries, the rest counted.
-- The earlier comment is found by its marker `<!-- pnpm-release-age -->` and the author
-  `github-actions[bot]`. Pass `${{ github.token }}`, or every run posts a new comment.
+- The log is data. Only package names of at most 214 characters, versions of at most 64
+  characters and strict timestamps reach the comment, in backticks, at most 50 entries, the rest
+  counted.
+- The earlier comment is found by the author `github-actions[bot]` and a body that starts with
+  the marker `<!-- pnpm-release-age -->`. Pass `${{ github.token }}`, or every run posts a new comment.
 - The artifact name carries `github.run_attempt`, so a rerun never reads an older log.
 - `set -o pipefail` is required in the install step. Without a `shell` key a step runs as
   `bash -e {0}`, and the job would take the exit code of `tee` instead of the install.
@@ -227,11 +228,17 @@ jobs:
           artifact-name: install-log-${{ github.run_attempt }}
 ```
 
+- Never call the action from the install job, and never give the install job
+  `pull-requests: write`. The install runs code of the pull request, which would then share a
+  runner with a token that can write to the pull request.
 - Replace the install command with the repository's own, for example `task web:deps`. Keep
   `set -o pipefail`, the `2>&1` and the `tee` into `$RUNNER_TEMP/install.log`.
 - `log-file` names the log inside the artifact when it is not `install.log`.
 - `jdx/mise-action` uses the job's read only token for tool downloads by default and does not
   persist it. Drop the step if the runner already has pnpm.
+- A pull request opened by Dependabot runs with a read only `GITHUB_TOKEN` by default. GitHub
+  documents that the `permissions` key raises it, so the comment job's `pull-requests: write`
+  should apply there too. This is not tested yet.
 - The action is referenced by the floating tag `@v0`, like the reusable workflows. It needs a
   release of this repository before `@v0` contains it.
 
