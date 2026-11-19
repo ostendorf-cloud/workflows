@@ -136,6 +136,12 @@ done
 # A branch with a newline or shell metacharacters is skipped and never
 # executed. A command that ran would create a file in the case directory.
 # The single quotes are the point: these are literal attack strings.
+# The non-ASCII cases (accented letters, a division slash and a fullwidth
+# solidus as lookalikes of the slash) guard the "export LC_ALL=C" in the
+# step, which keeps the character ranges byte wise. Removing it passes
+# these cases on a runner whose locale is C or POSIX, so the mutant dies
+# only where the locale differs, for example on a UTF-8 machine whose
+# collation lets a range such as A-Z match accented letters.
 # shellcheck disable=SC2016
 for branch in \
   $'renovate/x\nmain' $'renovate/x\n' $'\nrenovate/x' $'renovate/x\nrun=true' \
@@ -143,7 +149,8 @@ for branch in \
   'renovate/x&&touch pwned' 'renovate/x|touch pwned' 'renovate/x>pwned' \
   'renovate/${IFS}x' "renovate/x'" 'renovate/x"' 'renovate/*' 'renovate/x#' \
   'renovate/$(touch pwned)/x' 'renovate/x::set-output name=run::true' \
-  $'renovate/x\r' $'renovate/x\t'; do
+  $'renovate/x\r' $'renovate/x\t' \
+  'renovate/é' 'renovate/ä' 'renovate/xü' 'renovate∕x' 'renovate/x∕y' 'renovate／x' 'renovate/x／y'; do
   run_case workflow_run success "${branch}" "${repo}" "${repo}"
   expect "the crafted branch '${branch//$'\n'/\\n}' is skipped and not executed" skip
 done
@@ -247,6 +254,25 @@ job_if="$(awk '
   in_if && /^ *#/ { next }
   in_if { print }
 ' "${workflow}")"
+
+# The whole workflow_run clause is compared as one block, so a changed
+# operator, such as "&&" turned into "||", or an added or dropped line
+# fails. The block runs from the event name test to the "startsWith" line.
+want_clause="        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'renovate/')"
+got_clause="$(awk '
+  /^ *github\.event_name == .workflow_run. &&$/ { in_clause = 1 }
+  in_clause { print }
+  in_clause && /startsWith\(/ { exit }
+' <<<"${job_if}")"
+if [ "${got_clause}" != "${want_clause}" ]; then
+  fail "the job if holds the workflow_run clause as one exact block" "got:"$'\n'"${got_clause}"
+else
+  echo "PASS the job if holds the workflow_run clause as one exact block"
+fi
+
 for piece in \
   "github.event.workflow_run.conclusion == 'success'" \
   "github.event.workflow_run.head_repository.full_name == github.repository" \

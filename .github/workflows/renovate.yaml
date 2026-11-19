@@ -70,9 +70,11 @@ jobs:
   renovate:
     name: Call reusable-renovate
     # Calls "reusable-renovate.yaml" unconditionally on every trigger above:
-    # every "schedule" tick, every manual "workflow_dispatch", and every
+    # every "schedule" tick, every manual "workflow_dispatch", every
     # "issues"/"pull_request" "edited" event, regardless of sender or of
-    # which issue or pull request was edited. The anti-loop decision that
+    # which issue or pull request was edited, and every "workflow_run"
+    # "completed" event of the "checks" workflow on a "renovate/**"
+    # branch. The anti-loop decision that
     # used to gate this job directly now lives inside
     # "reusable-renovate.yaml" itself, as that reusable workflow's own
     # job-level "if:", so there is one centralized copy of the condition

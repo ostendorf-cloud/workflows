@@ -125,6 +125,8 @@ Available and planned workflows:
   - A workflow that does not run on Renovate branches never triggers the event. A name that
     matches no workflow fails silently: no event arrives and the schedule still works.
   - The caller file must be on the default branch, or GitHub delivers no event.
+  - The `workflow_run` trigger works only with a release of `reusable-renovate.yaml` that
+    contains this change. An older release fails safe: it does nothing for the event.
 
   Why this is safe, in three lines:
   - A `workflow_run` workflow runs from the default branch with secrets and a write token, even
