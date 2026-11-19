@@ -115,6 +115,37 @@ name: reusable-renovate
 #   branch protection, which lives in the infrastructure repository. Turn
 #   a switch on only for a repository whose branch protection requires
 #   the checks that matter.
+#
+# Run after the checks:
+#   A caller may add a "workflow_run" trigger on its checks workflow, with
+#   "types: [completed]" and "branches: ['renovate/**']", so Renovate runs
+#   as soon as the checks of a Renovate branch have finished, instead of
+#   waiting for a scheduled tick GitHub may delay for hours. The caller
+#   adds only the trigger. The condition lives here, once, and a caller
+#   that adds the trigger without any "if:" is safe.
+#
+#   Why this needs care: a "workflow_run" workflow runs from the default
+#   branch WITH secrets and a write token, even when the triggering run
+#   came from a fork. The head branch and the head repository of that run
+#   are attacker controlled text. So this workflow
+#   - never checks out or runs the code of the triggering run,
+#   - never puts "github.event.workflow_run.*" text inside a script: it
+#     reaches the step "Check the triggering event" only as environment
+#     variables, which the script compares and never executes or prints,
+#   - lets Renovate run only when the triggering run succeeded, ran in
+#     the calling repository itself (no fork) and ran on a branch that
+#     starts with "renovate/", written case sensitive in the step. A
+#     coarser, case insensitive copy sits in the job "if:", so most
+#     refused events never enter the concurrency group.
+#   The caller's "branches" filter is a first, coarse filter, not the
+#   defence. The caller's workflow file must be on the default branch for
+#   GitHub to deliver the event at all (GitHub docs, "workflow_run").
+#
+#   The name in the caller's "workflows:" list is the "name:" of the
+#   repository's checks workflow file. With several checks workflows, list
+#   each of them: Renovate then runs after each one that completes, and
+#   merges only when no check is failing or pending, so an early run
+#   merges nothing and the last run does.
 on:
   workflow_call:
     inputs:
@@ -162,6 +193,21 @@ jobs:
     # What fires:
     #   - every "schedule" tick on the caller;
     #   - every manual "workflow_dispatch" on the caller;
+    #   - a "workflow_run" "completed" event, but only when the triggering
+    #     run succeeded, ran in this very repository (no fork) and ran on a
+    #     branch starting with "renovate/". The step "Check the triggering
+    #     event" below repeats and tightens this, see the header comment.
+    #     The condition is also here, not only in that step, so a
+    #     "workflow_run" event that fails THIS coarse condition (another
+    #     conclusion, a fork, a branch outside "renovate/") never joins the
+    #     concurrency group below and so never displaces a genuine pending
+    #     run. This half is weaker than the step: "startsWith" and "=="
+    #     ignore case and accept any characters, so a branch of this very
+    #     repository such as "RENOVATE/x" or "renovate/a,b" passes here,
+    #     joins the group, can replace a genuine pending run, and then
+    #     does nothing, because the step refuses it. Only someone with
+    #     push access to the repository can create such a branch, and the
+    #     next scheduled tick recovers the replaced run;
     #   - an "issues"/"pull_request" "edited" event on the caller, but only
     #     when BOTH of:
     #     (a) the issue is the Dependency Dashboard, or the pull request is
@@ -205,6 +251,13 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'renovate/')
+      ) ||
+      (
+        github.event_name != 'workflow_run' &&
         github.event.sender.login != 'ostendorf-cloud-dependencies[bot]' &&
         (
           github.event.issue.title == 'Dependency Dashboard' ||
@@ -255,12 +308,26 @@ jobs:
     # now evaluates "if:" immediately, finds it false, and is reported as
     # "skipped" before it could ever be queued, let alone cancelled.
     #
+    # A burst of "workflow_run" events, one per finished checks run of
+    # several Renovate branches, falls under the same group. GitHub keeps
+    # one running and at most one pending run per group and cancels the
+    # older pending ones, even with "cancel-in-progress: false". That is
+    # fine here: one Renovate run handles every branch of the repository,
+    # and the newest pending run starts after every earlier event, so it
+    # sees at least the state the cancelled ones would have seen. A
+    # cancelled pending run belongs to no pull request and shows no failed
+    # check on one. The run in progress is never cancelled, so two Renovate
+    # processes never push to the same branches at once.
+    #
     # A genuine trigger (a "schedule" tick, a "workflow_dispatch", or a
     # human actually ticking the rebase checkbox, all of which still
     # satisfy "if:") still joins this same per-repository group and still
     # serialises against every other genuine trigger exactly as before;
-    # only a run that the guard was always going to skip no longer competes
-    # for that slot, or shows up as a red check for it.
+    # only a run that the job "if:" was always going to skip no longer
+    # competes for that slot, or shows up as a red check for it. A run that
+    # passes the job "if:" but that the step "Check the triggering event"
+    # refuses does compete, see the "workflow_run" entry under "What
+    # fires" above.
     #
     # Scoping the group per pull request instead (for example
     # "${{ github.workflow }}-${{ github.event.pull_request.number }}")
@@ -290,14 +357,56 @@ jobs:
     # lint checks, which finish in well under 10 minutes.
     timeout-minutes: 30
     steps:
+      # Fails closed for the "workflow_run" event, see "Run after the
+      # checks" in the header comment. Every value arrives as an
+      # environment variable, never as expression text inside the script,
+      # and is only compared, never executed or printed: a branch name can
+      # hold anything git allows, and a printed line could forge a
+      # workflow command. The script writes only the fixed literals
+      # "run=true" or "run=false" to the step output, and every later step
+      # runs only on "run=true". Any event outside the allow list below
+      # gets "run=false", whatever the job "if:" let through.
+      # scripts/reusable-renovate-guard_test.sh runs this block.
+      - name: Check the triggering event
+        id: guard
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          export LC_ALL=C
+          run=false
+          case "${EVENT_NAME:-}" in
+            schedule | workflow_dispatch | issues | pull_request)
+              run=true
+              ;;
+            workflow_run)
+              # Case sensitive on purpose: the expression "startsWith" in
+              # the job "if:" ignores case, this does not.
+              if [ "${RUN_CONCLUSION:-}" = "success" ] &&
+                [ -n "${REPOSITORY:-}" ] &&
+                [ "${RUN_HEAD_REPOSITORY:-}" = "${REPOSITORY:-}" ] &&
+                [[ "${RUN_HEAD_BRANCH:-}" =~ ^renovate/[A-Za-z0-9._/+@-]+$ ]]; then
+                run=true
+              fi
+              ;;
+          esac
+          echo "guard: run=${run}"
+          echo "run=${run}" >>"${GITHUB_OUTPUT}"
+
       # The upstream action's documented usage always checks out first. The
       # repository's own renovate.json is not read from this checkout:
       # Renovate reads each repository's config through the API, this one
-      # included.
+      # included. For a "workflow_run" event this checks out the default
+      # branch, never the code of the run that triggered it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: steps.guard.outputs.run == 'true'
 
       - name: Mint a dependencies app token scoped to this repository
         id: app-token
+        if: steps.guard.outputs.run == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
         with:
           app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
@@ -320,6 +429,7 @@ jobs:
       # below stays empty, and Renovate ignores an empty one.
       # scripts/reusable-renovate-automerge_test.sh runs this block.
       - name: Build the automerge package rules
+        if: steps.guard.outputs.run == 'true'
         id: automerge
         env:
           AUTO_MERGE_PATCH: ${{ vars.RENOVATE_AUTO_MERGE_PATCH }}
@@ -364,6 +474,7 @@ jobs:
 
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@acdd6bda8b035c99ce59d5675816af2aa65a1774  # v46.3.14
+        if: steps.guard.outputs.run == 'true'
         with:
           token: ${{ steps.app-token.outputs.token }}
         # Autodiscovery still drives which repositories this run processes,

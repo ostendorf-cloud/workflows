@@ -48,6 +48,17 @@ on:
     types: [edited]
   pull_request:
     types: [edited]
+  # Renovate runs when the checks of a Renovate branch have finished, so an
+  # automerge does not wait for the next scheduled tick. The "branches"
+  # filter is only a first filter: "reusable-renovate.yaml" runs Renovate
+  # only for a successful run of a "renovate/" branch of this repository,
+  # see its header comment "Run after the checks". "workflows" names every
+  # workflow that runs checks on a pull request: Renovate sees a pending
+  # check of a workflow left out here and would wait for the hourly cron.
+  workflow_run:
+    workflows: [checks, codeql, dco]
+    types: [completed]
+    branches: ["renovate/**"]
 
 # "contents: read" is enough for this caller: it only declares triggers and
 # calls "reusable-renovate.yaml" unconditionally, needing no permission of
@@ -61,9 +72,11 @@ jobs:
   renovate:
     name: Call reusable-renovate
     # Calls "reusable-renovate.yaml" unconditionally on every trigger above:
-    # every "schedule" tick, every manual "workflow_dispatch", and every
+    # every "schedule" tick, every manual "workflow_dispatch", every
     # "issues"/"pull_request" "edited" event, regardless of sender or of
-    # which issue or pull request was edited. The anti-loop decision that
+    # which issue or pull request was edited, and every "workflow_run"
+    # "completed" event of the "checks" workflow on a "renovate/**"
+    # branch. The anti-loop decision that
     # used to gate this job directly now lives inside
     # "reusable-renovate.yaml" itself, as that reusable workflow's own
     # job-level "if:", so there is one centralized copy of the condition

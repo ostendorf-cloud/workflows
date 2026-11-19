@@ -177,7 +177,8 @@ expect_on() {
 # The step reads both variables from the caller's "vars", has the id the
 # Renovate step reads its output from, and nothing else: no "if:", no
 # "continue-on-error:".
-want_wiring="        id: automerge
+want_wiring="        if: steps.guard.outputs.run == 'true'
+        id: automerge
         env:
           AUTO_MERGE_PATCH: \${{ vars.RENOVATE_AUTO_MERGE_PATCH }}
           AUTO_MERGE_MINOR: \${{ vars.RENOVATE_AUTO_MERGE_MINOR }}"
@@ -190,7 +191,8 @@ fi
 # The Renovate step gets the token, autodiscovery and the package rules,
 # and nothing else, such as RENOVATE_IGNORE_TESTS, RENOVATE_AUTOMERGE or
 # RENOVATE_PLATFORM_AUTOMERGE.
-want_renovate="        with:
+want_renovate="        if: steps.guard.outputs.run == 'true'
+        with:
           token: \${{ steps.app-token.outputs.token }}
         env:
           RENOVATE_AUTODISCOVER: 'true'
@@ -229,10 +231,10 @@ else
   echo "PASS no step writes to GITHUB_ENV"
 fi
 run_steps="$(grep -cE '^ +(- )?run: ' "${workflow}" || true)"
-if [ "${run_steps}" != "1" ]; then
-  fail "the automerge step is the only run step" "found ${run_steps} 'run:' keys, want 1"
+if [ "${run_steps}" != "2" ]; then
+  fail "the automerge step and the guard are the only run steps" "found ${run_steps} 'run:' keys, want 2"
 else
-  echo "PASS the automerge step is the only run step"
+  echo "PASS the automerge step and the guard are the only run steps"
 fi
 
 # A variable must never be expanded into the script text by the runner.

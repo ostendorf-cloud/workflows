@@ -102,6 +102,10 @@ Available and planned workflows:
       types: [edited]
     pull_request:
       types: [edited]
+    workflow_run:
+      workflows: [checks, codeql, dco] # every workflow that runs checks on a pull request
+      types: [completed]
+      branches: ["renovate/**"]
 
   jobs:
     renovate:
@@ -109,8 +113,30 @@ Available and planned workflows:
       secrets: inherit
   ```
 
-  Run it hourly: automerge needs a Renovate run after the checks are green, and a run is skipped
-  for the bot's own edits.
+  Run it hourly as well: a run is skipped for the bot's own edits, and GitHub delays or drops
+  scheduled runs under load. The `workflow_run` trigger runs Renovate right after the checks of a
+  Renovate branch have finished, so an automerge does not wait for the next tick.
+
+  Finding the name for `workflows:`:
+  - The `workflows:` list names every workflow that runs checks on a pull request, for example
+    `[checks, codeql, dco]`. Each entry is the `name:` field of a workflow file in
+    `.github/workflows/`, not the file name and not a job name.
+  - Renovate runs after each listed workflow, and merges only when no check is failing or still
+    running. A workflow left out of the list can leave a pending check, so Renovate waits for
+    the next scheduled tick.
+  - A workflow that does not run on Renovate branches never triggers the event. A name that
+    matches no workflow fails silently: no event arrives and the schedule still works.
+  - The caller file must be on the default branch, or GitHub delivers no event.
+  - The `workflow_run` trigger works only with a release of `reusable-renovate.yaml` that
+    contains this change. An older release fails safe: it does nothing for the event.
+
+  Why this is safe, in three lines:
+  - A `workflow_run` workflow runs from the default branch with secrets and a write token, even
+    for a fork. Its branch and repository text is attacker controlled.
+  - `reusable-renovate.yaml` runs Renovate only for a successful run of a branch that starts
+    with `renovate/` in the calling repository itself, written once in the reusable workflow.
+  - The text only reaches environment variables that are compared, never a script, a checkout
+    or a log line. The caller adds the trigger and no `if:`.
 
 - License-header check (`reusable-license.yaml`): runs `addlicense -check` over the files a
   caller selects and fails when one lacks a header. It never adds or rewrites a header.
