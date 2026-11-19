@@ -48,6 +48,15 @@ on:
     types: [edited]
   pull_request:
     types: [edited]
+  # Renovate runs when the checks of a Renovate branch have finished, so an
+  # automerge does not wait for the next scheduled tick. The "branches"
+  # filter is only a first filter: "reusable-renovate.yaml" runs Renovate
+  # only for a successful run of a "renovate/" branch of this repository,
+  # see its header comment "Run after the checks".
+  workflow_run:
+    workflows: [checks]
+    types: [completed]
+    branches: ["renovate/**"]
 
 # "contents: read" is enough for this caller: it only declares triggers and
 # calls "reusable-renovate.yaml" unconditionally, needing no permission of
