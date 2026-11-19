@@ -103,7 +103,7 @@ Available and planned workflows:
     pull_request:
       types: [edited]
     workflow_run:
-      workflows: [checks] # the name: of the repository's checks workflow
+      workflows: [checks, codeql, dco] # every workflow that runs checks on a pull request
       types: [completed]
       branches: ["renovate/**"]
 
@@ -118,10 +118,12 @@ Available and planned workflows:
   Renovate branch have finished, so an automerge does not wait for the next tick.
 
   Finding the name for `workflows:`:
-  - It is the `name:` field of the checks workflow file in `.github/workflows/`, for example
-    `checks`. It is not the file name and not a job name.
-  - With several workflows that run checks on a pull request, list each of them. Renovate then
-    runs after each one, and merges only when no check is failing or still running.
+  - The `workflows:` list names every workflow that runs checks on a pull request, for example
+    `[checks, codeql, dco]`. Each entry is the `name:` field of a workflow file in
+    `.github/workflows/`, not the file name and not a job name.
+  - Renovate runs after each listed workflow, and merges only when no check is failing or still
+    running. A workflow left out of the list can leave a pending check, so Renovate waits for
+    the next scheduled tick.
   - A workflow that does not run on Renovate branches never triggers the event. A name that
     matches no workflow fails silently: no event arrives and the schedule still works.
   - The caller file must be on the default branch, or GitHub delivers no event.

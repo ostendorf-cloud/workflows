@@ -52,9 +52,11 @@ on:
   # automerge does not wait for the next scheduled tick. The "branches"
   # filter is only a first filter: "reusable-renovate.yaml" runs Renovate
   # only for a successful run of a "renovate/" branch of this repository,
-  # see its header comment "Run after the checks".
+  # see its header comment "Run after the checks". "workflows" names every
+  # workflow that runs checks on a pull request: Renovate sees a pending
+  # check of a workflow left out here and would wait for the hourly cron.
   workflow_run:
-    workflows: [checks]
+    workflows: [checks, codeql, dco]
     types: [completed]
     branches: ["renovate/**"]
 

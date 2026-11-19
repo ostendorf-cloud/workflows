@@ -138,10 +138,11 @@ done
 # The single quotes are the point: these are literal attack strings.
 # The non-ASCII cases (accented letters, a division slash and a fullwidth
 # solidus as lookalikes of the slash) guard the "export LC_ALL=C" in the
-# step, which keeps the character ranges byte wise. Removing it passes
-# these cases on a runner whose locale is C or POSIX, so the mutant dies
-# only where the locale differs, for example on a UTF-8 machine whose
-# collation lets a range such as A-Z match accented letters.
+# step, which keeps the character ranges byte wise. No test kills the
+# mutant that removes it: on the machines checked, these cases pass with
+# and without it. It stays as defence, because a UTF-8 locale whose
+# collation lets a range such as A-Z match accented letters would
+# otherwise let those branches through.
 # shellcheck disable=SC2016
 for branch in \
   $'renovate/x\nmain' $'renovate/x\n' $'\nrenovate/x' $'renovate/x\nrun=true' \
