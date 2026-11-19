@@ -17,6 +17,12 @@
       "minimumReleaseAge": "2 days"
     },
     {
+      "description": "Renovate itself ships a patch release almost every day. A pull request for it is proposed once a week, so its checks can finish and it can merge before the next version is out. Covers the npm manager and the mise manager, which names the dependency npm:renovate with the package name renovate.",
+      "matchManagers": ["npm", "mise"],
+      "matchPackageNames": ["renovate", "npm:renovate"],
+      "schedule": ["before 6am on monday"]
+    },
+    {
       "description": "An action or reusable workflow release waits three days, so a compromised release has time to be noticed. A backdated tag passes at once. Container and service images get no floor.",
       "matchManagers": ["github-actions"],
       "matchDepTypes": ["action", "workflow"],

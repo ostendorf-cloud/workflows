@@ -384,6 +384,12 @@ only needs to hold what is actually specific to it:
   entry under `--frozen-lockfile`, while Renovate's own default is disabled, so Renovate opened a
   pull request the moment a release appeared and every job downstream of the dependency update
   failed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Two days sits above pnpm's one-day floor.
+- a `packageRules` entry that proposes the `renovate` package once a week, `before 6am on monday`
+  in Renovate's timezone (UTC unless a repository sets `timezone`). It matches the `npm` and
+  `mise` managers and the names `renovate` and `npm:renovate`, the latter being how the `mise`
+  manager names `"npm:renovate"` in `mise.toml`. Renovate publishes a patch release almost every
+  day, so a pull request kept getting rebased onto the next patch before its checks finished and
+  never merged.
 - a `packageRules` entry that raises `minimumReleaseAge` to three days for actions and reusable
   workflows (`github-actions` manager, depTypes `action` and `workflow`), and one after it that
   sets it back to `null`, no floor, for `ostendorf-cloud/workflows`. See
