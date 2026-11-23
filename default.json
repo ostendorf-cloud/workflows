@@ -17,6 +17,11 @@
       "minimumReleaseAge": "2 days"
     },
     {
+      "description": "A Go module major update replaces the old module in go.mod and rewrites the import paths in the source, instead of adding the new major next to the old one. Only the gomod manager is touched.",
+      "matchManagers": ["gomod"],
+      "postUpdateOptions": ["gomodUpdateImportPaths", "gomodTidy"]
+    },
+    {
       "description": "An action or reusable workflow release waits three days, so a compromised release has time to be noticed. A backdated tag passes at once. Container and service images get no floor.",
       "matchManagers": ["github-actions"],
       "matchDepTypes": ["action", "workflow"],

@@ -258,6 +258,39 @@ echo '{}' >"${work}/ws-sub/presets/x.json"
 run_case sub presets/x.json
 expect "a preset in a subdirectory resolves" 0 "resolving presets/x.json as renovate.json"
 
+# The shared preset migrates Go imports on a major update, for the gomod
+# manager and for no other. PRESET_UNDER_TEST points the check at a copy.
+preset="${PRESET_UNDER_TEST:-${repo_dir}/default.json}"
+go_options='["gomodUpdateImportPaths","gomodTidy"]'
+
+# Rules that name exactly the gomod manager and set both options.
+gomod_rules="$(jq --argjson want "${go_options}" '
+  [(.packageRules // [])[]
+   | select(.matchManagers == ["gomod"]
+            and ((.postUpdateOptions // []) | sort) == ($want | sort))]
+  | length' "${preset}")"
+if [ "${gomod_rules}" = "1" ]; then
+  echo "PASS the gomod manager gets the Go import path options"
+else
+  echo "FAIL the gomod manager gets the Go import path options: ${gomod_rules} matching rule(s), want 1"
+  failures=$((failures + 1))
+fi
+
+# Any other place that sets a Go option: the top level or another rule.
+elsewhere="$(jq '
+  [(if .postUpdateOptions then {rule: "top level", o: .postUpdateOptions} else empty end),
+   ((.packageRules // [])[]
+    | select(.postUpdateOptions and .matchManagers != ["gomod"])
+    | {rule: "other", o: .postUpdateOptions})]
+  | map(select(.o | any(startswith("gomod"))))
+  | length' "${preset}")"
+if [ "${elsewhere}" = "0" ]; then
+  echo "PASS no other manager gets a Go option"
+else
+  echo "FAIL no other manager gets a Go option: ${elsewhere} other place(s) set one"
+  failures=$((failures + 1))
+fi
+
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} test(s) failed"
   exit 1
