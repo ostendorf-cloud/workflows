@@ -306,12 +306,12 @@ else
   failures=$((failures + 1))
 fi
 
-# No other mise pin is disabled: every rule that touches the mise manager and
-# disables something must name packages, and only the two above.
+# No other mise pin is disabled: every rule that disables something for the mise
+# manager, or for every manager, must name packages, and only the two above.
 mise_wide="$(jq '
   [(.packageRules // [])[]
    | select(.enabled == false
-            and ((.matchManagers // []) | index("mise"))
+            and (((.matchManagers // []) | length) == 0 or ((.matchManagers // []) | index("mise")))
             and (((.matchPackageNames // []) | sort) != ["conda:imagemagick", "imagemagick"]))]
   | length' "${preset}")"
 mise_global="$(jq '[select(.enabled == false)] | length' "${preset}")"
