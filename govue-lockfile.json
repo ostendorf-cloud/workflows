@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Opt in preset: regenerates web/pnpm-lock.yaml for the govue npm dependency that a regex custom manager finds, since Renovate regenerates no lock file for a custom manager. The command must equal the one pattern in RENOVATE_ALLOWED_COMMANDS of reusable-renovate.yaml.",
+  "packageRules": [
+    {
+      "description": "Regenerate the pnpm lock file of web/ for the govue custom manager dependency, without project scripts and without the project pnpmfile. Commits only web/pnpm-lock.yaml.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["ostendorf-cloud/govue"],
+      "postUpgradeTasks": {
+        "commands": ["pnpm --dir web install --lockfile-only --ignore-scripts --ignore-pnpmfile"],
+        "fileFilters": ["web/pnpm-lock.yaml"],
+        "executionMode": "update",
+        "installTools": { "pnpm": {} }
+      }
+    }
+  ]
+}

@@ -146,6 +146,22 @@ name: reusable-renovate
 #   each of them: Renovate then runs after each one that completes, and
 #   merges only when no check is failing or pending, so an early run
 #   merges nothing and the last run does.
+#
+# Post upgrade task:
+#   "allowedCommands" holds one anchored pattern for one command,
+#   "pnpm --dir web install --lockfile-only --ignore-scripts
+#   --ignore-pnpmfile". The gate allows exactly this one command. The
+#   preset "govue-lockfile.json" only chooses when it runs: for the govue
+#   custom manager update. "postUpgradeTasks" is repository config, so any
+#   calling repository can attach the same command to any dependency, and
+#   set "workingDirTemplate" inside its checkout. The impact is low, since
+#   the command never changes. It runs in this job with the token minted
+#   below, which carries every permission the app has on the repository.
+#   Renovate passes the token to it as git configuration. It runs no
+#   project script and no project pnpmfile. Renovate commits only the
+#   files the task's "fileFilters" name. A repository stops the preset's
+#   task by removing the preset from its "extends".
+#   See docs/concepts/renovate-post-upgrade.md.
 on:
   workflow_call:
     inputs:
@@ -484,6 +500,13 @@ jobs:
         # above for why this does not need "RENOVATE_REPOSITORIES" instead.
         # "RENOVATE_PACKAGE_RULES" carries the automerge rules of the step
         # above, or nothing when both switches are off.
+        # "RENOVATE_ALLOWED_COMMANDS" allows exactly one post upgrade
+        # command, the one the opt in preset "govue-lockfile.json" sets.
+        # Renovate tests each pattern with a regex search, not a full
+        # match, so "^" and "$" are what make it match the whole command.
+        # The pattern holds no other regex metacharacter. See "Post upgrade
+        # task" in the header comment.
         env:
           RENOVATE_AUTODISCOVER: 'true'
           RENOVATE_PACKAGE_RULES: ${{ steps.automerge.outputs.package-rules }}
+          RENOVATE_ALLOWED_COMMANDS: '["^pnpm --dir web install --lockfile-only --ignore-scripts --ignore-pnpmfile$"]'
