@@ -291,6 +291,37 @@ else
   failures=$((failures + 1))
 fi
 
+# The shared preset leaves out the mise pins that have no Renovate datasource
+# result, for the mise manager and for those package names only.
+mise_rules="$(jq '
+  [(.packageRules // [])[]
+   | select(.matchManagers == ["mise"]
+            and ((.matchPackageNames // []) | sort) == ["conda:imagemagick", "imagemagick"]
+            and .enabled == false)]
+  | length' "${preset}")"
+if [ "${mise_rules}" = "1" ]; then
+  echo "PASS the mise manager skips the imagemagick lookup"
+else
+  echo "FAIL the mise manager skips the imagemagick lookup: ${mise_rules} matching rule(s), want 1"
+  failures=$((failures + 1))
+fi
+
+# No other mise pin is disabled: every rule that touches the mise manager and
+# disables something must name packages, and only the two above.
+mise_wide="$(jq '
+  [(.packageRules // [])[]
+   | select(.enabled == false
+            and ((.matchManagers // []) | index("mise"))
+            and (((.matchPackageNames // []) | sort) != ["conda:imagemagick", "imagemagick"]))]
+  | length' "${preset}")"
+mise_global="$(jq '[select(.enabled == false)] | length' "${preset}")"
+if [ "${mise_wide}" = "0" ] && [ "${mise_global}" = "0" ]; then
+  echo "PASS no other mise package is disabled"
+else
+  echo "FAIL no other mise package is disabled: ${mise_wide} wide rule(s), ${mise_global} global"
+  failures=$((failures + 1))
+fi
+
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} test(s) failed"
   exit 1

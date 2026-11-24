@@ -419,6 +419,10 @@ only needs to hold what is actually specific to it:
   `go.mod` and rewrites the import paths in the source, instead of adding the new major next to
   the old one. Application logic may still need a manual change, so a major update pull request is
   not always mergeable as it is. No other manager is touched.
+- a `packageRules` entry for the `mise` manager that sets `enabled` to `false` for `imagemagick`
+  and `conda:imagemagick`. Renovate looks the pin up as a conda package, finds no result and warns
+  on every run. The pin is updated by hand. No other mise tool is touched. Delete the rule to
+  re-enable the lookup.
 
 ### First party references
 
