@@ -179,7 +179,21 @@ awk '
   in_section && !in_block && /^```yaml$/ { in_block = 1; next }
   in_block && /^```$/ { exit }
   in_block { print }
-' "$readme" >"$work/caller-app.yaml"
+' "$readme" >"$work/caller-app.raw.yaml"
+assert test -s "$work/caller-app.raw.yaml"
+
+# The token step of the example names a placeholder instead of the digest, so a Renovate
+# update of the action never touches the README. The pin comes from reusable-renovate.yaml,
+# the single source: its form is checked here (name, 40 hex digest, "# vX.Y.Z" comment), and
+# the placeholder is replaced by it before the example is read and linted.
+renovate_mint=$(grep -oE 'actions/create-github-app-token@[0-9a-f]{40}  # v[0-9]+\.[0-9]+\.[0-9]+' "$renovate")
+assert test -n "$renovate_mint"
+placeholder='actions/create-github-app-token@<digest>  # <version>'
+assert grep -qxF "      - uses: $placeholder" "$work/caller-app.raw.yaml"
+# The example carries no concrete digest of any action named like the mint step.
+assert test "$(grep -c 'create-github-app-token@' "$work/caller-app.raw.yaml")" = 1
+raw=$(<"$work/caller-app.raw.yaml")
+printf '%s\n' "${raw//"$placeholder"/$renovate_mint}" >"$work/caller-app.yaml"
 p=$work/caller-app.yaml
 assert test -s "$p"
 
@@ -202,9 +216,6 @@ assert eq "$comment.steps | length" 2 "$p"
 mint="$comment.steps[0]"
 assert eq "$mint.id" app-token "$p"
 # The same pinned action as in reusable-renovate.yaml, digest and version comment.
-renovate_mint=$(grep -oE 'actions/create-github-app-token@[0-9a-f]{40}  # v[0-9.]+' "$renovate")
-assert test -n "$renovate_mint"
-assert grep -qF "      - uses: $renovate_mint" "$readme"
 assert eq "$mint.uses" "${renovate_mint%%  #*}" "$p"
 # Exactly the app, its key and one permission. No "owner" and no "repositories", so the
 # token is scoped to the calling repository only.

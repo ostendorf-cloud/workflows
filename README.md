@@ -360,7 +360,7 @@ jobs:
       cancel-in-progress: false
     steps:
       # No owner and no repositories: the token is scoped to this repository only.
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+      - uses: actions/create-github-app-token@<digest>  # <version>
         id: app-token
         with:
           app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
@@ -373,9 +373,11 @@ jobs:
           artifact-name: install-log-${{ github.run_attempt }}
 ```
 
-- `actions/create-github-app-token` v3.3.0 marks `app-id` as deprecated in favour of
-  `client-id`. The snippet keeps `app-id` and the existing variable, like
-  `reusable-renovate.yaml`.
+- Replace `<digest>` and `<version>` in the token step with the pin that
+  `reusable-renovate.yaml` uses for `actions/create-github-app-token`. The snippet carries no
+  digest, so a Renovate update of the action never needs a README edit.
+- `actions/create-github-app-token` marks `app-id` as deprecated in favour of `client-id`.
+  The snippet keeps `app-id` and the existing variable, like `reusable-renovate.yaml`.
 
 ## Renovate preset
 
