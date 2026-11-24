@@ -414,6 +414,11 @@ only needs to hold what is actually specific to it:
   workflows (`github-actions` manager, depTypes `action` and `workflow`), and one after it that
   sets it back to `null`, no floor, for `ostendorf-cloud/workflows`. See
   [GitHub Actions](#github-actions).
+- a `packageRules` entry for the `gomod` manager that sets `postUpdateOptions` to
+  `gomodUpdateImportPaths` and `gomodTidy`. A Go major update then replaces the old module in
+  `go.mod` and rewrites the import paths in the source, instead of adding the new major next to
+  the old one. Application logic may still need a manual change, so a major update pull request is
+  not always mergeable as it is. No other manager is touched.
 
 ### First party references
 
