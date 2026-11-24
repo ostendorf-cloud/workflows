@@ -16,9 +16,9 @@ Status: proposed, for issue #91.
 
 - A govue pull request carries the regenerated `web/pnpm-lock.yaml` in the update commit.
 - `allowedCommands` holds exactly one anchored pattern for one fixed command string.
-- The task runs for the govue npm dependency of the custom manager and for no other update.
+- The preset runs the task for the govue npm dependency of the custom manager and no other.
 - The task runs no project script and no project pnpmfile.
-- A repository opts in with one `extends` entry and opts out by removing it.
+- A repository opts in to the preset with one `extends` entry and opts out by removing it.
 - A test proves the task scope, the command string and the single anchored pattern.
 
 ## Non goals
@@ -35,9 +35,15 @@ Status: proposed, for issue #91.
 - Value: `["^pnpm --dir web install --lockfile-only --ignore-scripts --ignore-pnpmfile$"]`.
 - Renovate tests each pattern with a regex `test`, not a full match. `^` and `$` make the
   pattern match the whole command and nothing longer or shorter.
-- `--dir web` sits in the command, so the allowed pattern also fixes the directory.
-  `workingDirTemplate` would move the directory out of the allowed pattern.
+- `--dir web` sits in the command, so the allowed pattern fixes the directory below the
+  working directory. `workingDirTemplate` in the preset would move it out of the pattern.
 - The pattern has no regex metacharacter besides the anchors. It matches one string only.
+- The gate is global, the task is not. `allowedCommands` is a global option of the run.
+  `postUpgradeTasks` is repository configuration.
+- So any repository on this workflow can attach the same command to any dependency or
+  manager in its own config. It can also set `workingDirTemplate`, which stays in the checkout.
+- The gate allows exactly one command. The preset only chooses when it runs.
+- The impact is low: the command never changes, whoever attaches it.
 - Repository side: a second published preset `govue-lockfile.json`, extended as
   `github>ostendorf-cloud/workflows:govue-lockfile#v0`.
 - The preset holds one package rule: `matchManagers: ["custom.regex"]` and
@@ -47,8 +53,10 @@ Status: proposed, for issue #91.
 - `executionMode: "update"` runs the task for the upgrade that carries it. `"branch"` reads
   the task from the first upgrade of the branch, which may be the Go half and carry none.
 - The task runs after Renovate wrote every file of the branch, so pnpm sees the new specifier.
-- pnpm: `installTools` makes Renovate run `install-tool pnpm <version>` before the command
-  when `binarySource` is `install` in the containerbase image the action runs.
+- pnpm: `installTools` makes Renovate run `install-tool pnpm <constraints.pnpm>` before the
+  command when `binarySource` is `install` and Renovate runs in a containerbase image.
+- `binarySource` defaults to `install` in `config/options/index.js` of renovate 44.238.0.
+  The workflow does not override it. Expected to work, not run.
 - The pnpm version comes from `constraints.pnpm` of the upgrade. Without it Renovate installs
   the newest stable pnpm. The repository sets it in its govue rule to the pnpm it pins.
 
@@ -58,7 +66,10 @@ Status: proposed, for issue #91.
 - That token is the dependencies app token, scoped to the calling repository only.
 - Renovate hands it to the child process as git URL rewrite configuration
   (`GIT_CONFIG_KEY_n` and `GIT_CONFIG_VALUE_n`). Other variables of the job are not passed.
-- The run can write what the app may write in that one repository: branches and pull requests.
+- `create-github-app-token` gets no `permission-*` input. The token therefore carries every
+  permission the GitHub App has on that repository.
+- That set is defined in the infrastructure repository and was not checked here.
+- The command can use all of it, in that one repository.
 - No new secret and no new permission is added.
 - Renovate commits only files that match `fileFilters`, so only `web/pnpm-lock.yaml`.
 - `--ignore-scripts` and `--ignore-pnpmfile` close the path for project code to run.
@@ -66,6 +77,15 @@ Status: proposed, for issue #91.
   Those come from the default branch, like the rest of the repository's configuration.
 - A dependency the new lock file names still installs from its registry in later jobs.
   The release age floors and the frozen lock file checks of the repository still apply.
+
+## Residual risks, not verified
+
+- pnpm may switch to another pnpm version named in `packageManager` or `devEngines`, and
+  fetch it.
+- `--ignore-pnpmfile` may not cover config dependencies or plugins in `pnpm-workspace.yaml`.
+- A `web/.npmrc` can point the registry elsewhere. The token does not reach that registry,
+  because Renovate filters the child environment.
+- Each of these needs write access to the default branch, which Renovate already trusts.
 
 ## Alternatives
 
@@ -75,13 +95,12 @@ Status: proposed, for issue #91.
   a `web/` directory.
 - No automation: the manual step stays on every govue pull request and is easy to forget.
 - A wider pattern such as `^pnpm install.*$`: it lets any repository run any pnpm flags.
-- `workingDirTemplate: "web"`: works, but the allowed pattern then no longer fixes the
+- `workingDirTemplate: "web"`: works, but the allowed pattern then says nothing about the
   directory.
 - `executionMode: "branch"`: depends on which upgrade of the group sorts first.
 
 ## Open questions
 
-- Does the action's Renovate image run with `binarySource=install`? Check the first real run.
 - Does pnpm skip a `prepare` script of a git hosted dependency under `--ignore-scripts`?
   Check the first real run log. govue is first party.
 - pnpm 12 refuses a package younger than its release age floor. Does a fresh govue tag

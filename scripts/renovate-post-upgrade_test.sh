@@ -116,6 +116,11 @@ check "the task is scoped to the govue custom manager dependency only" \
 
 tasks="$(jq -c '[(.packageRules // [])[] | select(has("postUpgradeTasks"))][0].postUpgradeTasks' \
   "${preset}")"
+# Exactly these keys, so a later "workingDirTemplate" or "dataFileTemplate"
+# fails here and gets a review of its own.
+check "the task sets exactly the expected keys" \
+  '["commands","executionMode","fileFilters","installTools"]' \
+  "$(jq -c 'keys' <<<"${tasks}")"
 check "only the web lock file is committed" '["web/pnpm-lock.yaml"]' \
   "$(jq -c '.fileFilters' <<<"${tasks}")"
 check "the task runs per update" '"update"' "$(jq -c '.executionMode' <<<"${tasks}")"

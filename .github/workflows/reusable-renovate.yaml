@@ -150,12 +150,17 @@ name: reusable-renovate
 # Post upgrade task:
 #   "allowedCommands" holds one anchored pattern for one command,
 #   "pnpm --dir web install --lockfile-only --ignore-scripts
-#   --ignore-pnpmfile". Only a repository that extends the preset
-#   "govue-lockfile.json" runs it, for its govue custom manager update.
-#   The command runs in this job with the token minted below, which
-#   Renovate passes to it as git configuration. It runs no project script
-#   and no project pnpmfile, and Renovate commits only the lock file. A
-#   repository turns it off by removing the preset from its "extends".
+#   --ignore-pnpmfile". The gate allows exactly this one command. The
+#   preset "govue-lockfile.json" only chooses when it runs: for the govue
+#   custom manager update. "postUpgradeTasks" is repository config, so any
+#   calling repository can attach the same command to any dependency, and
+#   set "workingDirTemplate" inside its checkout. The impact is low, since
+#   the command never changes. It runs in this job with the token minted
+#   below, which carries every permission the app has on the repository.
+#   Renovate passes the token to it as git configuration. It runs no
+#   project script and no project pnpmfile. Renovate commits only the
+#   files the task's "fileFilters" name. A repository stops the preset's
+#   task by removing the preset from its "extends".
 #   See docs/concepts/renovate-post-upgrade.md.
 on:
   workflow_call:

@@ -470,15 +470,22 @@ pins in the rule of its govue group:
 - `reusable-renovate.yaml` allows this one command and no other, through
   `RENOVATE_ALLOWED_COMMANDS`. The pattern is anchored with `^` and `$`, because Renovate searches
   a pattern anywhere in the command.
-- Renovate commits only `web/pnpm-lock.yaml` from the task (`fileFilters`).
+- The gate is global. `postUpgradeTasks` is repository configuration. Any repository on this
+  workflow can attach the same command to any dependency or manager, and set
+  `workingDirTemplate` inside its checkout. The gate allows exactly one command. The preset only
+  chooses when it runs. The impact is low, since the command never changes.
+- Renovate commits only `web/pnpm-lock.yaml` from the preset's task (`fileFilters`).
 - The task runs no project script and no project pnpmfile.
 - It runs in the Renovate job with the dependencies app token of that run, scoped to the calling
-  repository. Renovate passes the token to the command as git configuration.
+  repository. The workflow sets no `permission-*` input, so the token carries every permission
+  the GitHub App has on that repository. That set is defined in the infrastructure repository
+  and was not checked here. Renovate passes the token to the command as git configuration.
 - `installTools` installs pnpm in the Renovate container before the command. The version comes
   from `constraints.pnpm`. Without it Renovate installs the newest stable pnpm.
 - Limits: the repository keeps its package in `web/`, and only the govue dependency of the custom
   manager is covered. Other managers regenerate their own lock files.
-- To turn it off in one repository, remove the preset from `extends`. The manual step is then back.
+- To turn the preset's task off in one repository, remove the preset from `extends`. The manual
+  step is then back.
 - To turn it off for every repository, remove `RENOVATE_ALLOWED_COMMANDS` from
   `reusable-renovate.yaml`. A repository that still extends the preset then gets an artifact error
   on each govue pull request instead of a lock file.
