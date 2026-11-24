@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.8.0](https://github.com/ostendorf-cloud/workflows/compare/v0.7.0...v0.8.0) (2026-11-24)
+
+### Features
+
+- **renovate:** regenerate the govue pnpm lock file after an update ([#92](https://github.com/ostendorf-cloud/workflows/pull/92))
+- **renovate:** migrate Go imports on a major module update ([#85](https://github.com/ostendorf-cloud/workflows/pull/85))
+
+### Bug Fixes
+
+- **renovate:** skip the mise imagemagick lookup ([#88](https://github.com/ostendorf-cloud/workflows/pull/88))
+- **test:** derive the app token pin from the workflow, not the README ([#90](https://github.com/ostendorf-cloud/workflows/pull/90))
+
 ## [v0.7.0](https://github.com/ostendorf-cloud/workflows/compare/v0.6.0...v0.7.0) (2026-11-19)
 
 ### Features
