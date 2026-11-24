@@ -435,6 +435,56 @@ versioning, proposes a bump to the newest exact tag and a digest pin. With the r
 as the newest `v0.x` tag, so neither reference gets an update. A new tag of this repository
 moves `v0`, and every consumer picks it up without a change.
 
+### govue lock file preset
+
+`govue-lockfile.json` is an opt in preset. It regenerates `web/pnpm-lock.yaml` when Renovate
+updates the govue npm dependency through a regex custom manager. Renovate regenerates no lock
+file for a custom manager, so without it each govue pull request needs a manual pnpm run.
+
+A repository that needs it adds the preset next to the shared one, and sets the pnpm version it
+pins in the rule of its govue group:
+
+```json
+{
+  "extends": [
+    "github>ostendorf-cloud/workflows#v0",
+    "github>ostendorf-cloud/workflows:govue-lockfile#v0"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["github.com/ostendorf-cloud/govue", "ostendorf-cloud/govue"],
+      "groupName": "govue",
+      "constraints": { "pnpm": "12.21.0" }
+    }
+  ]
+}
+```
+
+- The preset sets one `postUpgradeTasks` command for the `custom.regex` manager and the package
+  `ostendorf-cloud/govue`, and for nothing else:
+
+  ```sh
+  pnpm --dir web install --lockfile-only --ignore-scripts --ignore-pnpmfile
+  ```
+
+- `reusable-renovate.yaml` allows this one command and no other, through
+  `RENOVATE_ALLOWED_COMMANDS`. The pattern is anchored with `^` and `$`, because Renovate searches
+  a pattern anywhere in the command.
+- Renovate commits only `web/pnpm-lock.yaml` from the task (`fileFilters`).
+- The task runs no project script and no project pnpmfile.
+- It runs in the Renovate job with the dependencies app token of that run, scoped to the calling
+  repository. Renovate passes the token to the command as git configuration.
+- `installTools` installs pnpm in the Renovate container before the command. The version comes
+  from `constraints.pnpm`. Without it Renovate installs the newest stable pnpm.
+- Limits: the repository keeps its package in `web/`, and only the govue dependency of the custom
+  manager is covered. Other managers regenerate their own lock files.
+- To turn it off in one repository, remove the preset from `extends`. The manual step is then back.
+- To turn it off for every repository, remove `RENOVATE_ALLOWED_COMMANDS` from
+  `reusable-renovate.yaml`. A repository that still extends the preset then gets an artifact error
+  on each govue pull request instead of a lock file.
+- `scripts/renovate-post-upgrade_test.sh` checks the scope, the command, and the one anchored
+  pattern. See [the concept](docs/concepts/renovate-post-upgrade.md) for the design.
+
 ## Renovate automerge
 
 `reusable-renovate.yaml` can let Renovate merge updates by itself once the checks are green. Two

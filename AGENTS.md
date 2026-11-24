@@ -15,6 +15,9 @@ rules apply and are not repeated here.
 - `default.json`: a published Renovate preset for every repository in this organisation, pinned
   by the same kind of tag as a reusable workflow. It is not this repository's own Renovate
   configuration; that stays in `renovate.json`.
+- `govue-lockfile.json`: an opt in Renovate preset that runs the one post upgrade command
+  `reusable-renovate.yaml` allows. See `docs/concepts/renovate-post-upgrade.md`.
+- `docs/concepts/`: concept docs written before a feature is built.
 - No application code, no Go module, no `package.json`: this repository IS workflow YAML, plus a
   couple of shell scripts under `scripts/` for its own CI glue, such as the DCO check.
 

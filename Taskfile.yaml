@@ -47,6 +47,7 @@ tasks:
       - scripts/pnpm-release-age-comment-action_test.sh
       - scripts/reusable-renovate-automerge_test.sh
       - scripts/reusable-renovate-guard_test.sh
+      - scripts/renovate-post-upgrade_test.sh
 
   check:
     desc: Every check, one after another

@@ -188,15 +188,17 @@ else
   echo "PASS the step is wired to both variables and nothing else"
 fi
 
-# The Renovate step gets the token, autodiscovery and the package rules,
-# and nothing else, such as RENOVATE_IGNORE_TESTS, RENOVATE_AUTOMERGE or
-# RENOVATE_PLATFORM_AUTOMERGE.
+# The Renovate step gets the token, autodiscovery, the package rules and
+# the one allowed post upgrade command, and nothing else, such as
+# RENOVATE_IGNORE_TESTS, RENOVATE_AUTOMERGE or RENOVATE_PLATFORM_AUTOMERGE.
+# scripts/renovate-post-upgrade_test.sh checks the allowed command itself.
 want_renovate="        if: steps.guard.outputs.run == 'true'
         with:
           token: \${{ steps.app-token.outputs.token }}
         env:
           RENOVATE_AUTODISCOVER: 'true'
-          RENOVATE_PACKAGE_RULES: \${{ steps.automerge.outputs.package-rules }}"
+          RENOVATE_PACKAGE_RULES: \${{ steps.automerge.outputs.package-rules }}
+          RENOVATE_ALLOWED_COMMANDS: '[\"^pnpm --dir web install --lockfile-only --ignore-scripts --ignore-pnpmfile\$\"]'"
 if [ "$(cat "${work}/renovate-step")" != "${want_renovate}" ]; then
   fail "the Renovate step has exactly the expected keys" "got:"$'\n'"$(cat "${work}/renovate-step")"
 else
