@@ -22,6 +22,12 @@
       "postUpdateOptions": ["gomodUpdateImportPaths", "gomodTidy"]
     },
     {
+      "description": "The imagemagick pin of mise.toml has no Renovate datasource result: Renovate looks it up as a conda package and warns 'Failed to look up conda package imagemagick: no-result' on every run. The lookup is switched off for this one package, so the pin is updated by hand. To re-enable it, delete this rule once the lookup resolves. Only the mise manager and only these names are touched.",
+      "matchManagers": ["mise"],
+      "matchPackageNames": ["imagemagick", "conda:imagemagick"],
+      "enabled": false
+    },
+    {
       "description": "An action or reusable workflow release waits three days, so a compromised release has time to be noticed. A backdated tag passes at once. Container and service images get no floor.",
       "matchManagers": ["github-actions"],
       "matchDepTypes": ["action", "workflow"],
