@@ -187,8 +187,10 @@ Available and planned workflows:
     number. It exits with code 2 and names the value.
   - It skips `node_modules`, `.git`, `vendor` and `.claude/worktrees`. It counts the last line
     of a file even without a final newline.
-  - A run without a terminal needs `--yes` or `--trusted-hosts github.com` to trust the remote
-    Taskfile. The workflow passes `--trusted-hosts github.com`.
+  - A run without a terminal, such as a CI job, cannot answer task's trust prompt for the remote
+    Taskfile. It needs `--yes` or `--trusted-hosts github.com` on every `task` call that loads
+    the include, not only on the included target. The workflow passes `--trusted-hosts
+    github.com`.
   - `scripts/lint-agents-md_test.sh` runs the task over generated fixtures in a temporary
     directory. It also breaks the comparison in a copy and requires the suite to fail on it.
 
@@ -199,6 +201,11 @@ Available and planned workflows:
       taskfile: https://github.com/ostendorf-cloud/workflows.git//taskfiles/agents-md.yaml?ref=<tag>
       checksum: <sha256>
       flatten: true
+  ```
+
+  ```sh
+  # Caller, in CI or any run without a terminal
+  task --trusted-hosts github.com lint:agents-md
   ```
 
   ```yaml
