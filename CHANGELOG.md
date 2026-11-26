@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.9.0](https://github.com/ostendorf-cloud/workflows/compare/v0.8.0...v0.9.0) (2026-11-26)
+
+### Features
+
+- add a shared AGENTS.md line limit check ([#96](https://github.com/ostendorf-cloud/workflows/pull/96))
+
 ## [v0.8.0](https://github.com/ostendorf-cloud/workflows/compare/v0.7.0...v0.8.0) (2026-11-24)
 
 ### Features
