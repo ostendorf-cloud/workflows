@@ -563,14 +563,16 @@ by default, so a repository without them behaves as before.
 - Nothing the `github-actions` manager finds merges through these switches, whatever they say:
   no action, no reusable workflow, no container or service image of a workflow. See
   [GitHub Actions](#github-actions).
-- Packages under `ostendorf-cloud` never merge through these switches. A first party release
-  always needs a human. The rule matches `ostendorf-cloud/**`, `@ostendorf-cloud/**`,
-  `github.com/ostendorf-cloud/**`, `ghcr.io/ostendorf-cloud/**`,
-  `https://github.com/ostendorf-cloud/**` and `git::https://github.com/ostendorf-cloud/**`.
+- First party packages under `ostendorf-cloud` merge through these switches like any other
+  package. Patch and minor follow the matching switch. Major never merges, first party or not.
+- The preset reference `ostendorf-cloud/workflows#v0` comes from the `renovate-config` manager
+  in `renovate.json`. The `github-actions` rule does not cover it, so it merges through the
+  switches too, on patch and minor. This is intended: the rule exists for what the
+  `github-actions` manager finds, not for the preset. The workflow references `@v0` in
+  `.github/workflows` stay excluded.
 - A repository's own configuration can still merge any of these. A package rule with
   `matchUpdateTypes: ["major"]` and `automerge: true`, the `:automergeAll` preset or a top level
-  `major: { "automerge": true }` merges majors. A package rule with `matchPackageNames: ["*"]` and
-  `automerge: true` merges first party packages.
+  `major: { "automerge": true }` merges majors.
 - No release follows by itself. An automerged `fix(deps)` commit only lands in the release pull
   request that `release-me` keeps open. A release happens when the owner merges that pull
   request.
