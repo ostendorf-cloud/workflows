@@ -81,11 +81,12 @@ name: reusable-renovate
 #   the release age floor in default.json only delays an update and gives
 #   a compromised release time to be noticed. It guarantees nothing. To
 #   let action patches merge again later, remove "actions_rule" from the
-#   step below. Nothing under
-#   ostendorf-cloud merges through them: a first party release always
-#   needs a human. A repository's own package rules can still merge any
-#   of these. With both
-#   switches off, the step "Build the automerge package rules" below
+#   step below. First party packages under ostendorf-cloud merge
+#   through them like any other package: patch and minor only, never
+#   major. The preset reference of the renovate-config manager is no
+#   github-actions reference, so it merges through them too. A
+#   repository's own package rules can still merge any of these. With
+#   both switches off, the step "Build the automerge package rules" below
 #   emits nothing and Renovate runs exactly as before.
 #
 #   How the switch reaches Renovate: the step builds a JSON array of
@@ -473,19 +474,13 @@ jobs:
           actions_rule='{"description":"GitHub Actions never merge by themselves, a moved or'
           actions_rule+=' backdated tag can pass every other check.",'
           actions_rule+='"matchManagers":["github-actions"],"automerge":false}'
-          first_party_rule='{"description":"First party packages never merge by themselves.",'
-          first_party_rule+='"matchPackageNames":["ostendorf-cloud/**","@ostendorf-cloud/**",'
-          first_party_rule+='"github.com/ostendorf-cloud/**","ghcr.io/ostendorf-cloud/**",'
-          first_party_rule+='"https://github.com/ostendorf-cloud/**",'
-          first_party_rule+='"git::https://github.com/ostendorf-cloud/**"],'
-          first_party_rule+='"automerge":false}'
 
           rules="${patch_rule}"
           if [ "${minor}" = "true" ]; then
             rules="${rules},${minor_rule}"
           fi
-          # After the switch rules, so they win over them.
-          rules="[${rules},${actions_rule},${first_party_rule}]"
+          # After the switch rules, so it wins over them.
+          rules="[${rules},${actions_rule}]"
           echo "package-rules=${rules}" >>"${GITHUB_OUTPUT}"
 
       - name: Self-hosted Renovate

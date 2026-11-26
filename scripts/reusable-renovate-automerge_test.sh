@@ -118,9 +118,10 @@ expect_off() {
 }
 
 # expect_on <name> <description> <types>: the case wrote valid JSON, one
-# line, whose automerge rules cover exactly <types>. After them come
-# exactly two rules that turn automerge off: every GitHub Actions
-# update, then every first party package. No rule sets any other option.
+# line, whose automerge rules cover exactly <types>. After them comes
+# exactly one rule that turns automerge off: every GitHub Actions update.
+# No rule names a package, so first party packages merge like any other.
+# No rule sets any other option.
 expect_on() {
   local name="$1" what="$2" want="$3"
   local rules="${work}/rules-${name}"
@@ -144,29 +145,29 @@ expect_on() {
     return
   fi
   if ! jq -e '
-    (.[-2] | del(.description) == {"matchManagers": ["github-actions"],
+    (.[-1] | del(.description) == {"matchManagers": ["github-actions"],
       "automerge": false})
   ' "${rules}" >/dev/null; then
-    fail "${what}" "the GitHub Actions rule is not second to last or not exact: $(cat "${rules}")"
+    fail "${what}" "the GitHub Actions rule is not last or not exact: $(cat "${rules}")"
     return
   fi
+  # First party packages get no rule of their own: no rule matches a
+  # package name, so they merge under the switch rules like any other
+  # package, and the rules before the GitHub Actions rule all turn
+  # automerge on.
   if ! jq -e '
-    (.[-1] | .automerge == false and (has("matchUpdateTypes") | not) and
-      (has("matchManagers") | not) and
-      (.matchPackageNames | sort) == (["@ostendorf-cloud/**",
-        "ghcr.io/ostendorf-cloud/**", "git::https://github.com/ostendorf-cloud/**",
-        "github.com/ostendorf-cloud/**", "https://github.com/ostendorf-cloud/**",
-        "ostendorf-cloud/**"]))
-    and ([.[:-2][] | .automerge] | all(. == true))
+    ([.[] | has("matchPackageNames")] | any | not)
+    and ([.[:-1][] | .automerge] | all(. == true))
+    and (tostring | contains("ostendorf-cloud") | not)
   ' "${rules}" >/dev/null; then
-    fail "${what}" "the first party rule is not last or not complete: $(cat "${rules}")"
+    fail "${what}" "a rule names a package or a first party rule is left: $(cat "${rules}")"
     return
   fi
   # The only guard against a switch rule that also sets an option such as
   # "ignoreTests" or "automergeType".
   if ! jq -e '
     [.[] | keys[]] - ["automerge", "description", "matchManagers",
-      "matchPackageNames", "matchUpdateTypes"] | length == 0
+      "matchUpdateTypes"] | length == 0
   ' "${rules}" >/dev/null; then
     fail "${what}" "a rule sets another option: $(cat "${rules}")"
     return
@@ -367,7 +368,8 @@ const samples = [
   ['gomod', 'golang.org/x/net', ['digest'], 'require'],
   ['github-actions', 'ostendorf-cloud/workflows', ['patch', 'digest'], 'workflow'],
   ['github-actions', 'ostendorf-cloud/release-me/action', ['patch'], 'action'],
-  ['npm', '@ostendorf-cloud/kit', ['patch'], 'dependencies'],
+  ['renovate-config', 'ostendorf-cloud/workflows', ['patch', 'minor', 'major'], 'preset'],
+  ['npm', '@ostendorf-cloud/kit', ['patch', 'major'], 'dependencies'],
   ['gomod', 'github.com/ostendorf-cloud/kit', ['minor'], 'require'],
   ['dockerfile', 'ghcr.io/ostendorf-cloud/kit', ['digest'], 'final'],
   ['terraform', 'https://github.com/ostendorf-cloud/kit', ['patch'], 'module'],
@@ -423,12 +425,19 @@ EOF
   done
 
   # Nothing the github-actions manager finds merges: no action, no
-  # reusable workflow, no container or service image.
+  # reusable workflow, no container or service image. First party
+  # packages of other managers merge like any other package on patch and
+  # minor, the renovate-config preset reference included, and never on
+  # major.
   patch_want="$(lines \
     "merge patch npm left-pad" \
     "merge pinDigest npm left-pad" \
     "merge patch dockerfile node" \
-    "merge patch regex example/tool")"
+    "merge patch regex example/tool" \
+    "merge patch renovate-config ostendorf-cloud/workflows" \
+    "merge patch npm @ostendorf-cloud/kit" \
+    "merge patch terraform https://github.com/ostendorf-cloud/kit" \
+    "merge patch terraform git::https://github.com/ostendorf-cloud/kit")"
   minor_want="$(lines \
     "merge digest dockerfile node" \
     "merge digest gomod golang.org/x/net" \
@@ -437,7 +446,14 @@ EOF
     "merge patch dockerfile node" \
     "merge patch npm left-pad" \
     "merge patch regex example/tool" \
-    "merge pinDigest npm left-pad")"
+    "merge pinDigest npm left-pad" \
+    "merge digest dockerfile ghcr.io/ostendorf-cloud/kit" \
+    "merge minor gomod github.com/ostendorf-cloud/kit" \
+    "merge minor renovate-config ostendorf-cloud/workflows" \
+    "merge patch renovate-config ostendorf-cloud/workflows" \
+    "merge patch npm @ostendorf-cloud/kit" \
+    "merge patch terraform https://github.com/ostendorf-cloud/kit" \
+    "merge patch terraform git::https://github.com/ostendorf-cloud/kit")"
 
   expect_resolved unset "off: nothing automerges under default.json" "${preset}" ""
   expect_resolved patch "patch: third party patch and pinDigest automerge, no GitHub Actions" "${preset}" \
@@ -462,6 +478,7 @@ EOF
     "age npm @ostendorf-cloud/kit 2 days" \
     "age npm left-pad 2 days" \
     "age regex example/tool none" \
+    "age renovate-config ostendorf-cloud/workflows none" \
     "age terraform git::https://github.com/ostendorf-cloud/kit none" \
     "age terraform https://github.com/ostendorf-cloud/kit none")"
   if [ "${got_age}" != "${want_age}" ]; then
@@ -493,7 +510,9 @@ EOF
   expect_resolved patch "a repository rule merges majors by itself" "${work}/repo-major.json" \
     "$(lines "${patch_want}" \
       "merge major github-actions actions/checkout" \
-      "merge major npm left-pad")"
+      "merge major npm @ostendorf-cloud/kit" \
+      "merge major npm left-pad" \
+      "merge major renovate-config ostendorf-cloud/workflows")"
 fi
 
 if [ "${failures}" -ne 0 ]; then
