@@ -52,15 +52,19 @@ tasks:
       - |
         over=0
         skip='-name node_modules -o -name .git -o -name vendor -o -path ./.claude/worktrees'
-        for f in $(find . \( $skip \) -prune -o -name AGENTS.md -type f -print); do
-          limit={{.NESTED}}
-          [ "$f" = ./AGENTS.md ] && limit={{.ROOT}}
-          lines=$(($(wc -l < "$f")))
-          if [ "$lines" -gt "$limit" ]; then
-            echo "{{if eq .MODE_VALUE "fail"}}error{{else}}warning{{end}}: $f has $lines lines, the limit is $limit"
-            over=1
-          fi
-        done
+        export ROOT={{.ROOT}} NESTED={{.NESTED}} LABEL={{if eq .MODE_VALUE "fail"}}error{{else}}warning{{end}}
+        find . \( $skip \) -prune -o -name AGENTS.md -type f -exec sh -c '
+          rc=0
+          for f; do
+            limit=$NESTED
+            [ "$f" = ./AGENTS.md ] && limit=$ROOT
+            lines=$(awk "END{print NR}" "$f")
+            if [ "$lines" -gt "$limit" ]; then
+              echo "$LABEL: $f has $lines lines, the limit is $limit"
+              rc=1
+            fi
+          done
+          exit $rc' sh {} + || over=1
         [ "$over" = 0 ] || [ "{{.MODE_VALUE}}" != fail ]
 
   test:shell:

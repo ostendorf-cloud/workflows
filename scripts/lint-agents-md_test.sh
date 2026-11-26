@@ -24,6 +24,12 @@ lines() {
   seq "$1" >"$2"
 }
 
+# lines_nonl <n> <file>: like lines, but the last line has no newline.
+lines_nonl() {
+  mkdir -p "$(dirname "$2")"
+  seq "$1" | awk '{ printf "%s%s", sep, $0; sep = "\n" }' >"$2"
+}
+
 # suite <label> <taskfile>: runs every case against the given Taskfile and
 # adds the failed cases to "failures".
 failures=0
@@ -136,6 +142,27 @@ EOF
   lines 500 "${ws}/.claude/worktrees/x/AGENTS.md"
   lines 500 "${ws}/vendor/lib/AGENTS.md"
   check "node_modules, .git, worktrees and vendor are skipped" 0 "" MODE=fail
+
+  # A last line without a trailing newline still counts.
+  fixture nonl-at
+  lines_nonl 150 "${ws}/AGENTS.md"
+  lines_nonl 100 "${ws}/sub/AGENTS.md"
+  check "files at the limit without a final newline pass" 0 "" MODE=fail
+  fixture nonl-over
+  lines_nonl 151 "${ws}/AGENTS.md"
+  check "a root file over the limit without a final newline fails" 1 "./AGENTS.md has 151 lines" MODE=fail
+  fixture nonl-over-nested
+  lines_nonl 101 "${ws}/sub/AGENTS.md"
+  check "a nested file over the limit without a final newline fails" 1 "./sub/AGENTS.md has 101 lines" MODE=fail
+
+  # A directory name with a space.
+  fixture space
+  lines 10 "${ws}/AGENTS.md"
+  lines 101 "${ws}/my docs/AGENTS.md"
+  check "a directory with a space is checked" 1 "./my docs/AGENTS.md has 101 lines" MODE=fail
+  fixture space-ok
+  lines 100 "${ws}/my docs/AGENTS.md"
+  check "a directory with a space at the limit passes" 0 "" MODE=fail
 
   # No AGENTS.md at all is not a failure.
   fixture none
