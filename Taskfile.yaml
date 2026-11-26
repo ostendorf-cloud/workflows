@@ -1,5 +1,12 @@
 version: "3"
 
+# lint:agents-md lives in its own Taskfile so other repositories can include it
+# without picking up the tasks of this one.
+includes:
+  agents-md:
+    taskfile: taskfiles/agents-md.yaml
+    flatten: true
+
 tasks:
   setup:
     desc: Install the pinned toolchain
@@ -48,6 +55,7 @@ tasks:
       - scripts/reusable-renovate-automerge_test.sh
       - scripts/reusable-renovate-guard_test.sh
       - scripts/renovate-post-upgrade_test.sh
+      - scripts/lint-agents-md_test.sh
 
   check:
     desc: Every check, one after another
@@ -57,5 +65,6 @@ tasks:
       - task: lint:markdown
       - task: lint:shell
       - task: lint:license
+      - task: lint:agents-md
       - task: lint:secrets
       - task: test:shell

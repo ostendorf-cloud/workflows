@@ -1,0 +1,82 @@
+name: reusable-agents-md
+
+# Runs the calling repository's own "lint:agents-md" task, which limits the
+# line count of the root AGENTS.md and of every nested one. The task comes
+# from taskfiles/agents-md.yaml of this repository, which the caller includes from a git
+# URL pinned with "?ref=" and "checksum:". See the README for the include.
+#
+# The caller's mise.toml must pin task. mise-action installs the caller's
+# toolchain, so the task runs on the same version as locally.
+#
+# Inputs:
+#   runs-on-runner: the runner label the job runs on, default ubuntu-latest.
+#
+#   mode: "warn" or "fail", default "warn". In warn mode a file over its limit
+#     prints a warning and the job passes. In fail mode the job fails. Any
+#     other value fails the job. Passed to the task as the environment
+#     variable MODE.
+#
+#   root-limit: the most lines the root AGENTS.md may have, default "150".
+#     Passed as ROOT_LIMIT.
+#
+#   nested-limit: the most lines a nested AGENTS.md may have, default "100".
+#     Passed as NESTED_LIMIT.
+#
+#   The limits are read as environment variables, not as "vars" on the
+#   include, because those do not reliably reach the tasks of a remote
+#   Taskfile.
+on:
+  workflow_call:
+    inputs:
+      runs-on-runner:
+        description: Runner label the AGENTS.md check runs on.
+        type: string
+        default: ubuntu-latest
+      mode:
+        description: >-
+          warn prints a warning for a file over its limit, fail fails the job.
+        type: string
+        default: warn
+      root-limit:
+        description: Most lines the root AGENTS.md may have.
+        type: string
+        default: "150"
+      nested-limit:
+        description: Most lines a nested AGENTS.md may have.
+        type: string
+        default: "100"
+
+permissions:
+  contents: read
+
+jobs:
+  agents-md:
+    name: AGENTS.md line limit
+    runs-on: ${{ inputs.runs-on-runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+
+      - name: Check AGENTS.md line limits
+        env:
+          MODE: ${{ inputs.mode }}
+          ROOT_LIMIT: ${{ inputs.root-limit }}
+          NESTED_LIMIT: ${{ inputs.nested-limit }}
+        run: |
+          case "${MODE}" in
+            warn | fail) ;;
+            *)
+              echo "mode must be warn or fail, got: ${MODE}" >&2
+              exit 1
+              ;;
+          esac
+          case "${ROOT_LIMIT}${NESTED_LIMIT}" in
+            '' | *[!0-9]*)
+              echo "root-limit and nested-limit must be whole numbers" >&2
+              exit 1
+              ;;
+          esac
+          # A remote include needs trust in a run without a terminal.
+          task --trusted-hosts github.com lint:agents-md

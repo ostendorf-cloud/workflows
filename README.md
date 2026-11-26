@@ -172,6 +172,44 @@ Available and planned workflows:
           find . -name '*.go' -not -path './vendor/*'
   ```
 
+- AGENTS.md line limit (`reusable-agents-md.yaml`): installs mise and runs the caller's
+  `task lint:agents-md`. The root `AGENTS.md` may have 150 lines, a nested one 100. The default
+  mode only warns.
+  - Inputs, all optional: `mode` (`warn` or `fail`, default `warn`), `root-limit` (default
+    `150`), `nested-limit` (default `100`) and `runs-on-runner`.
+  - The task lives in its own file, `taskfiles/agents-md.yaml`, and nothing else is in it. A
+    caller includes it from a git URL, pinned with `?ref=` and `checksum:`, and its `mise.toml`
+    pins `task`. The caller gets only `lint:agents-md`, so its own `check` task does not collide.
+  - The task reads `MODE`, `ROOT_LIMIT` and `NESTED_LIMIT` from CLI variables or the
+    environment, not from `vars` on the include. It checks the directory it is run from, not
+    the directory of the included Taskfile.
+  - The task rejects a `MODE` other than `warn` or `fail` and a limit that is not a whole
+    number. It exits with code 2 and names the value.
+  - It skips `node_modules`, `.git`, `vendor` and `.claude/worktrees`. It counts the last line
+    of a file even without a final newline.
+  - A run without a terminal needs `--yes` or `--trusted-hosts github.com` to trust the remote
+    Taskfile. The workflow passes `--trusted-hosts github.com`.
+  - `scripts/lint-agents-md_test.sh` runs the task over generated fixtures in a temporary
+    directory. It also breaks the comparison in a copy and requires the suite to fail on it.
+
+  ```yaml
+  # Caller Taskfile.yaml
+  includes:
+    shared:
+      taskfile: https://github.com/ostendorf-cloud/workflows.git//taskfiles/agents-md.yaml?ref=<tag>
+      checksum: <sha256>
+      flatten: true
+  ```
+
+  ```yaml
+  # Caller workflow
+  jobs:
+    agents-md:
+      uses: ostendorf-cloud/workflows/.github/workflows/reusable-agents-md.yaml@<tag>
+      with:
+        mode: fail
+  ```
+
 - CodeQL scanning: planned, tracked by its own issue.
 
 ## pnpm release age comment
