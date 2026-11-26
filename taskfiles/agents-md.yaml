@@ -1,0 +1,51 @@
+version: "3"
+
+# Shared with other repositories through a remote include. This file holds only
+# lint:agents-md, so a caller that includes it gets no other task and cannot
+# collide with its own "check". Settings come from CLI variables or the
+# environment (ROOT_LIMIT, NESTED_LIMIT, MODE), never from vars on the include.
+# The dir is the caller's, not the included Taskfile's.
+tasks:
+  lint:agents-md:
+    desc: AGENTS.md line limits, ROOT_LIMIT 150, NESTED_LIMIT 100, MODE warn or fail
+    dir: "{{.USER_WORKING_DIR}}"
+    silent: true
+    vars:
+      ROOT: '{{default (env "ROOT_LIMIT" | default "150") .ROOT_LIMIT}}'
+      NESTED: '{{default (env "NESTED_LIMIT" | default "100") .NESTED_LIMIT}}'
+      MODE_VALUE: '{{default (env "MODE" | default "warn") .MODE}}'
+    cmds:
+      - |
+        mode='{{.MODE_VALUE}}'
+        root='{{.ROOT}}'
+        nested='{{.NESTED}}'
+        case "$mode" in
+          warn | fail) ;;
+          *)
+            echo "error: MODE must be warn or fail, got: $mode" >&2
+            exit 2
+            ;;
+        esac
+        case "$root$nested" in
+          '' | *[!0-9]*)
+            echo "error: ROOT_LIMIT and NESTED_LIMIT must be whole numbers, got: $root and $nested" >&2
+            exit 2
+            ;;
+        esac
+        over=0
+        skip='-name node_modules -o -name .git -o -name vendor -o -path ./.claude/worktrees'
+        export ROOT="$root" NESTED="$nested" LABEL=warning
+        [ "$mode" = fail ] && LABEL=error
+        find . \( $skip \) -prune -o -name AGENTS.md -type f -exec sh -c '
+          rc=0
+          for f; do
+            limit=$NESTED
+            [ "$f" = ./AGENTS.md ] && limit=$ROOT
+            lines=$(awk "END{print NR}" "$f")
+            if [ "$lines" -gt "$limit" ]; then
+              echo "$LABEL: $f has $lines lines, the limit is $limit"
+              rc=1
+            fi
+          done
+          exit $rc' sh {} + || over=1
+        [ "$over" = 0 ] || [ "$mode" != fail ]

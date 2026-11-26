@@ -1,5 +1,12 @@
 version: "3"
 
+# lint:agents-md lives in its own Taskfile so other repositories can include it
+# without picking up the tasks of this one.
+includes:
+  agents-md:
+    taskfile: taskfiles/agents-md.yaml
+    flatten: true
+
 tasks:
   setup:
     desc: Install the pinned toolchain
@@ -36,36 +43,6 @@ tasks:
     desc: License header check for every shell script
     cmds:
       - addlicense -check -c "Simon Ostendorf" -y 2026 -l apache -s=only scripts/*.sh .github/actions/*/*.sh
-
-  # Shared with other repositories through a remote include. Settings come from
-  # CLI variables or the environment (ROOT_LIMIT, NESTED_LIMIT, MODE), never from
-  # vars on the include. The dir is the caller's, not the included Taskfile's.
-  lint:agents-md:
-    desc: AGENTS.md line limits, ROOT_LIMIT 150, NESTED_LIMIT 100, MODE warn or fail
-    dir: "{{.USER_WORKING_DIR}}"
-    silent: true
-    vars:
-      ROOT: '{{default (env "ROOT_LIMIT" | default "150") .ROOT_LIMIT}}'
-      NESTED: '{{default (env "NESTED_LIMIT" | default "100") .NESTED_LIMIT}}'
-      MODE_VALUE: '{{default (env "MODE" | default "warn") .MODE}}'
-    cmds:
-      - |
-        over=0
-        skip='-name node_modules -o -name .git -o -name vendor -o -path ./.claude/worktrees'
-        export ROOT={{.ROOT}} NESTED={{.NESTED}} LABEL={{if eq .MODE_VALUE "fail"}}error{{else}}warning{{end}}
-        find . \( $skip \) -prune -o -name AGENTS.md -type f -exec sh -c '
-          rc=0
-          for f; do
-            limit=$NESTED
-            [ "$f" = ./AGENTS.md ] && limit=$ROOT
-            lines=$(awk "END{print NR}" "$f")
-            if [ "$lines" -gt "$limit" ]; then
-              echo "$LABEL: $f has $lines lines, the limit is $limit"
-              rc=1
-            fi
-          done
-          exit $rc' sh {} + || over=1
-        [ "$over" = 0 ] || [ "{{.MODE_VALUE}}" != fail ]
 
   test:shell:
     desc: Shell script tests for this repository's CI scripts and the scripts of its actions

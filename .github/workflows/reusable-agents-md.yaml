@@ -2,7 +2,7 @@ name: reusable-agents-md
 
 # Runs the calling repository's own "lint:agents-md" task, which limits the
 # line count of the root AGENTS.md and of every nested one. The task comes
-# from the Taskfile of this repository, which the caller includes from a git
+# from taskfiles/agents-md.yaml of this repository, which the caller includes from a git
 # URL pinned with "?ref=" and "checksum:". See the README for the include.
 #
 # The caller's mise.toml must pin task. mise-action installs the caller's

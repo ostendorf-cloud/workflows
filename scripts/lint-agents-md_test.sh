@@ -2,17 +2,19 @@
 # Copyright 2026 Simon Ostendorf
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests for the "lint:agents-md" task in Taskfile.yaml. The real task runs
-# through a local include with "flatten: true", from a throwaway directory
-# that holds the fixtures, so the test also proves the task checks the
-# caller's directory and not the directory of the included Taskfile. The
-# fixture files are generated, one line per number. A last step breaks the
-# comparison in a copy of the Taskfile and requires this suite to fail on
-# it, so a check that passes everything cannot go unnoticed.
+# Tests for the "lint:agents-md" task in taskfiles/agents-md.yaml. The real
+# task runs through a local include with "flatten: true", from a throwaway
+# directory that holds the fixtures, so the test also proves the task checks
+# the caller's directory and not the directory of the included Taskfile. The
+# fixture files are generated, one line per number. Two last steps mutate a
+# copy of the Taskfile and require this suite to fail on it: a broken
+# comparison, so a check that passes everything cannot go unnoticed, and a
+# second task named "check" in the shared file, the old layout, which must
+# collide with the "check" task of a caller.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-taskfile="${LINT_AGENTS_MD_TASKFILE:-${script_dir}/../Taskfile.yaml}"
+taskfile="${LINT_AGENTS_MD_TASKFILE:-${script_dir}/../taskfiles/agents-md.yaml}"
 taskfile="$(cd "$(dirname "${taskfile}")" && pwd)/$(basename "${taskfile}")"
 # An explicit template, because macOS mktemp ignores TMPDIR without one.
 work="$(mktemp -d "${TMPDIR:-/tmp}/lint-agents-md.XXXXXXXX")"
@@ -168,6 +170,36 @@ EOF
   fixture none
   check "no AGENTS.md passes" 0 "" MODE=fail
 
+  # A caller with its own "check" task includes the shared task without a
+  # collision, and its own task still runs.
+  fixture own-check
+  printf '%s\n' \
+    'tasks:' \
+    '  check:' \
+    '    cmds:' \
+    '      - echo caller-check-ran' >>"${ws}/Taskfile.yaml"
+  lines 10 "${ws}/AGENTS.md"
+  check "a caller defining its own check task can include the shared task" 0 "" MODE=fail
+  code=0
+  out="$(cd "${ws}" && task check 2>&1)" || code=$?
+  if [ "${code}" != 0 ] || ! grep -qF "caller-check-ran" <<<"${out}"; then
+    echo "FAIL ${label} the caller's own check task runs: exit code = ${code}"
+    echo "${out}"
+    failures=$((failures + 1))
+  else
+    echo "PASS ${label} the caller's own check task runs"
+  fi
+
+  # The task validates MODE and the limits itself.
+  fixture invalid
+  lines 10 "${ws}/AGENTS.md"
+  check "an unknown MODE fails" 1 "MODE must be warn or fail, got: bogus" MODE=bogus
+  check "MODE is case sensitive" 1 "MODE must be warn or fail, got: Fail" MODE=Fail
+  check "a ROOT_LIMIT with a letter fails" 1 "must be whole numbers" MODE=fail ROOT_LIMIT=15O
+  check "a NESTED_LIMIT with a letter fails" 1 "must be whole numbers" MODE=fail NESTED_LIMIT=abc
+  check "a negative limit fails" 1 "must be whole numbers" MODE=warn ROOT_LIMIT=-5
+  check "an invalid value fails in warn mode too" 1 "must be whole numbers" MODE=warn NESTED_LIMIT=1.5
+
   # Both findings are reported, not only the first.
   fixture both
   lines 200 "${ws}/AGENTS.md"
@@ -200,6 +232,21 @@ else
   fi
   failures="${real_failures}"
 fi
+
+# Mutation: the old layout, a "check" task in the shared file, must collide
+# with the "check" task of the caller in the "own-check" case.
+oldlayout="${work}/oldlayout.yaml"
+printf '%s\n' "${content}" '' '  check:' '    cmds:' '      - echo shared-check' >"${oldlayout}"
+real_failures="${failures}"
+failures=0
+suite oldlayout "${oldlayout}" >"${work}/oldlayout.log" 2>&1 || true
+if grep -qF "FAIL oldlayout a caller defining its own check task" "${work}/oldlayout.log"; then
+  echo "PASS mutation: a shared check task collides with the caller's check task"
+else
+  echo "FAIL mutation: the suite passes with a check task in the shared file"
+  real_failures=$((real_failures + 1))
+fi
+failures="${real_failures}"
 
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} test(s) failed"
