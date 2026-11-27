@@ -280,14 +280,17 @@ jobs:
     # expression, so each side of the "||"/"&&" below is safe to evaluate
     # regardless of which event triggered the caller's run.
     #
-    # The "pull_request" "edited" event that can satisfy this condition
-    # runs from the pull request's own merge-ref workflow files, not from
-    # the default branch; see renovate.yaml's header comment for why that
-    # is not fork-exploitable (bot authorship is still required above).
-    # The "pull_request_target" event runs from the default branch and also
-    # starts for a pull request with a merge conflict. It needs no clause of
-    # its own: "github.event.pull_request.user.login" exists for it as well,
-    # and any other event without that field fails the condition.
+    # The "pull_request_target" "edited" event that can satisfy this
+    # condition runs from the default branch, so a pull request cannot
+    # change which workflow file runs, and it also starts for a pull request
+    # with a merge conflict. An external fork cannot author a pull request
+    # as the org-controlled dependencies bot, and that authorship is still
+    # required above. The event needs no clause of its own:
+    # "github.event.pull_request.user.login" exists for it as well, and any
+    # other event without that field fails the condition. A "pull_request"
+    # "edited" event, which a caller may still list, runs from the pull
+    # request's merge-ref workflow files and is held to the same bot
+    # authorship condition.
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||

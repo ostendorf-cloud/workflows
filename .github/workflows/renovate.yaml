@@ -14,10 +14,10 @@ name: renovate
 # time, instead of waiting for the next "schedule" tick. Checking that
 # checkbox edits the Dependency Dashboard issue body (for a repository-wide
 # rebase) or a Renovate pull request's own body (for a single PR), which
-# GitHub reports as an "issues"/"pull_request_target" "edited" event. The old
+# GitHub reports as an "issues"/"pull_request" "edited" event. The old
 # org-wide workflow could never react to that edit at all: a single GitHub
 # App installation spanning many repositories has no way to subscribe to a
-# same-repository "issues"/"pull_request_target" event belonging to one specific
+# same-repository "issues"/"pull_request" event belonging to one specific
 # repository out of all of them, because the event is native to the
 # repository it happens in, not to the app installation. A per-repository
 # caller workflow like this one can, because the event now belongs to the
