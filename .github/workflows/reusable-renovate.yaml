@@ -148,6 +148,26 @@ name: reusable-renovate
 #   merges only when no check is failing or pending, so an early run
 #   merges nothing and the last run does.
 #
+# Rebase checkbox on a conflicting pull request:
+#   GitHub starts no "pull_request" workflow for a pull request with a merge
+#   conflict, so a tick of the rebase checkbox does nothing exactly where a
+#   rebase is needed. "pull_request_target" starts for both. A caller
+#   therefore uses "pull_request_target: types: [edited]" instead of
+#   "pull_request: types: [edited]". This workflow accepts both events with
+#   the same conditions: the pull request is authored by the dependencies
+#   bot and the sender is not that bot.
+#
+#   Why this is safe: "pull_request_target" runs from the default branch
+#   with secrets and a write token. This workflow never checks out, builds
+#   or runs code of the pull request: its only checkout takes no "ref" and
+#   so gets the default branch, and the pull request fields reach no script.
+#   Renovate reads the repository's configuration through the API.
+#
+#   A caller that lists both events starts two runs for one tick on a pull
+#   request without a conflict. The concurrency group of the job serialises
+#   them, and the second run finds nothing left to rebase. Listing only
+#   "pull_request_target" avoids the second run and is the recommended form.
+#
 # Post upgrade task:
 #   "allowedCommands" holds one anchored pattern for one command,
 #   "pnpm --dir web install --lockfile-only --ignore-scripts
@@ -225,7 +245,8 @@ jobs:
     #     does nothing, because the step refuses it. Only someone with
     #     push access to the repository can create such a branch, and the
     #     next scheduled tick recovers the replaced run;
-    #   - an "issues"/"pull_request" "edited" event on the caller, but only
+    #   - an "issues"/"pull_request"/"pull_request_target" "edited" event on
+    #     the caller, but only
     #     when BOTH of:
     #     (a) the issue is the Dependency Dashboard, or the pull request is
     #         authored by the dependencies bot, AND
@@ -260,10 +281,17 @@ jobs:
     # expression, so each side of the "||"/"&&" below is safe to evaluate
     # regardless of which event triggered the caller's run.
     #
-    # The "pull_request" "edited" event that can satisfy this condition
-    # runs from the pull request's own merge-ref workflow files, not from
-    # the default branch; see renovate.yaml's header comment for why that
-    # is not fork-exploitable (bot authorship is still required above).
+    # The "pull_request_target" "edited" event that can satisfy this
+    # condition runs from the default branch, so a pull request cannot
+    # change which workflow file runs, and it also starts for a pull request
+    # with a merge conflict. An external fork cannot author a pull request
+    # as the org-controlled dependencies bot, and that authorship is still
+    # required above. The event needs no clause of its own:
+    # "github.event.pull_request.user.login" exists for it as well, and any
+    # other event without that field fails the condition. A "pull_request"
+    # "edited" event, which a caller may still list, runs from the pull
+    # request's merge-ref workflow files and is held to the same bot
+    # authorship condition.
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
@@ -396,7 +424,7 @@ jobs:
           export LC_ALL=C
           run=false
           case "${EVENT_NAME:-}" in
-            schedule | workflow_dispatch | issues | pull_request)
+            schedule | workflow_dispatch | issues | pull_request | pull_request_target)
               run=true
               ;;
             workflow_run)
@@ -417,7 +445,9 @@ jobs:
       # repository's own renovate.json is not read from this checkout:
       # Renovate reads each repository's config through the API, this one
       # included. For a "workflow_run" event this checks out the default
-      # branch, never the code of the run that triggered it.
+      # branch, never the code of the run that triggered it. The same holds
+      # for "pull_request_target": no "ref" is set, so the checkout is the
+      # default branch and never the head of the pull request. Keep it so.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: steps.guard.outputs.run == 'true'
 

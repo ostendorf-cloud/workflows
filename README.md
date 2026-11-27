@@ -85,7 +85,7 @@ Available and planned workflows:
   repository, authenticated through the ostendorf-cloud-dependencies GitHub App with a token
   scoped to only that one repository, so autodiscovery finds exactly that repository and no
   other. Meant to be called from a caller's own `schedule`, `workflow_dispatch`, and
-  `issues`/`pull_request` `edited` triggers, so a human checking a Renovate rebase checkbox
+  `issues`/`pull_request_target` `edited` triggers, so a human checking a Renovate rebase checkbox
   reacts within that run's CI time instead of waiting for the next scheduled tick; this
   repository's own `renovate.yaml` does exactly that for itself. The anti-loop logic deciding
   whether an `edited` event should actually trigger a run lives inside `reusable-renovate.yaml`
@@ -100,7 +100,7 @@ Available and planned workflows:
     workflow_dispatch:
     issues:
       types: [edited]
-    pull_request:
+    pull_request_target: # not pull_request: GitHub starts no pull_request run for a conflicting PR
       types: [edited]
     workflow_run:
       workflows: [checks, codeql, dco] # every workflow that runs checks on a pull request
@@ -112,6 +112,9 @@ Available and planned workflows:
       uses: ostendorf-cloud/workflows/.github/workflows/reusable-renovate.yaml@v0.3.0
       secrets: inherit
   ```
+
+  The workflow also accepts `pull_request`. Use `pull_request_target` alone: listing both starts
+  two serialised runs for one tick. It never checks out pull request code.
 
   Run it hourly as well: a run is skipped for the bot's own edits, and GitHub delays or drops
   scheduled runs under load. The `workflow_run` trigger runs Renovate right after the checks of a

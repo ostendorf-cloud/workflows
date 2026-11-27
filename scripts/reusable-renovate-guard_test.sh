@@ -108,9 +108,12 @@ run_case issues "" "" "" "${repo}"
 expect "an issues event runs, the job if decides" run
 run_case pull_request "" "" "" "${repo}"
 expect "a pull_request event runs, the job if decides" run
+run_case pull_request_target "" "" "" "${repo}"
+expect "a pull_request_target event runs, the job if decides" run
 
 # Events outside the allow list never run.
-for event in push pull_request_target workflow_call repository_dispatch "" "workflow_run "; do
+for event in push workflow_call repository_dispatch unknown_event pull_request_review \
+  pull_request_target_x Pull_Request_Target "" "workflow_run "; do
   run_case "${event}" success "${good_branch}" "${repo}" "${repo}"
   expect "the event '${event}' is skipped" skip
 done
@@ -295,6 +298,18 @@ if ! grep -qF "github.event.sender.login != 'ostendorf-cloud-dependencies[bot]'"
   fail "the anti-loop clause stays" "the sender check is gone"
 else
   echo "PASS the anti-loop clause stays"
+fi
+if ! grep -qF "github.event.pull_request.user.login == 'ostendorf-cloud-dependencies[bot]'" <<<"${job_if}"; then
+  fail "the bot author clause stays" "the pull request author check is gone"
+else
+  echo "PASS the bot author clause stays"
+fi
+# pull_request_target runs with secrets, so no checkout may take a ref and
+# nothing may name the head of the pull request.
+if grep -v '^ *#' "${workflow}" | grep -nE '^ +ref:|pull_request\.head|refs/pull'; then
+  fail "no checkout of pull request code" "found a ref or a pull request head"
+else
+  echo "PASS no checkout of pull request code"
 fi
 if grep -v '^ *#' "${workflow}" | grep -nE 'workflow_run\.(head|pull|display)' | grep -vE '^[0-9]+:\s+(RUN_HEAD_[A-Z_]+: \$\{\{|startsWith\(|github\.event\.workflow_run\.head_repository\.full_name == github\.repository)'; then
   fail "workflow_run head fields are used only as variables or in the job if" "found another use"
