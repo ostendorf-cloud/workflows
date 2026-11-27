@@ -9,31 +9,35 @@ name: renovate
 # runs Renovate for just this repository, from this repository's own
 # triggers.
 #
-# The "issues"/"pull_request" "edited" triggers below exist so that a
+# The "issues"/"pull_request_target" "edited" triggers below exist so that a
 # human checking a Renovate rebase checkbox reacts within this run's CI
 # time, instead of waiting for the next "schedule" tick. Checking that
 # checkbox edits the Dependency Dashboard issue body (for a repository-wide
 # rebase) or a Renovate pull request's own body (for a single PR), which
-# GitHub reports as an "issues"/"pull_request" "edited" event. The old
+# GitHub reports as an "issues"/"pull_request_target" "edited" event. The old
 # org-wide workflow could never react to that edit at all: a single GitHub
 # App installation spanning many repositories has no way to subscribe to a
-# same-repository "issues"/"pull_request" event belonging to one specific
+# same-repository "issues"/"pull_request_target" event belonging to one specific
 # repository out of all of them, because the event is native to the
 # repository it happens in, not to the app installation. A per-repository
 # caller workflow like this one can, because the event now belongs to the
 # very repository the workflow file lives in.
 #
-# "pull_request: edited" (not "pull_request_target") resolves and runs this
-# workflow's own YAML from the pull request's merge ref, not from the
-# default branch. A pull request that modified these very workflow files
-# (for example bumping a pinned action digest) would run that modified
-# version, with the dependencies app's private key available through
-# "secrets: inherit", the moment its rebase checkbox is edited. This is NOT
-# fork-exploitable: the anti-loop "if:" (centralized in
+# "pull_request_target: edited" (not "pull_request") is used because GitHub
+# starts no "pull_request" workflow for a pull request with a merge
+# conflict, and a conflicting pull request is exactly where the rebase
+# checkbox is needed. "pull_request_target" runs this workflow's own YAML
+# from the default branch, so a pull request cannot change what runs, and it
+# starts for a conflicting pull request too. It runs with the dependencies
+# app's private key available through "secrets: inherit", so it must never
+# check out or run pull request code. "reusable-renovate.yaml" checks out
+# only the default branch. The anti-loop "if:" (centralized in
 # "reusable-renovate.yaml", see that file's "renovate" job) still requires
 # the pull request be authored by "ostendorf-cloud-dependencies[bot]"
 # before anything runs, and an external fork cannot author a pull request
-# as that trusted, org-controlled bot.
+# as that trusted, org-controlled bot. Listing "pull_request" as well would
+# start a second, serialised run for one tick, so only the target event is
+# listed.
 on:
   # Hourly. The minute is unchanged from the retired workflow.
   schedule:
@@ -46,7 +50,7 @@ on:
   workflow_dispatch:
   issues:
     types: [edited]
-  pull_request:
+  pull_request_target:
     types: [edited]
   # Renovate runs when the checks of a Renovate branch have finished, so an
   # automerge does not wait for the next scheduled tick. The "branches"
@@ -73,7 +77,7 @@ jobs:
     name: Call reusable-renovate
     # Calls "reusable-renovate.yaml" unconditionally on every trigger above:
     # every "schedule" tick, every manual "workflow_dispatch", every
-    # "issues"/"pull_request" "edited" event, regardless of sender or of
+    # "issues"/"pull_request_target" "edited" event, regardless of sender or of
     # which issue or pull request was edited, and every "workflow_run"
     # "completed" event of the "checks" workflow on a "renovate/**"
     # branch. The anti-loop decision that
