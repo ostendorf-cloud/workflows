@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.10.0](https://github.com/ostendorf-cloud/workflows/compare/v0.9.0...v0.10.0) (2026-11-27)
+
+### Features
+
+- **renovate:** let first party patch and minor updates automerge ([#102](https://github.com/ostendorf-cloud/workflows/pull/102))
+
+### Bug Fixes
+
+- **renovate:** accept pull_request_target for conflicting PRs ([#105](https://github.com/ostendorf-cloud/workflows/pull/105))
+
 ## [v0.9.0](https://github.com/ostendorf-cloud/workflows/compare/v0.8.0...v0.9.0) (2026-11-26)
 
 ### Features
