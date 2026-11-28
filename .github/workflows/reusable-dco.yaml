@@ -28,7 +28,7 @@ name: reusable-dco
 #   reusable workflow with no declaration and no "secrets: inherit",
 #   so it needs none here.
 #
-#   vars.GH_APP_SECURITY_APP_ID, the security app's app id, is a
+#   vars.GH_APP_SECURITY_CLIENT_ID, the security app's client id, is a
 #   repository or organisation level variable, also automatically
 #   available in a called reusable workflow with no declaration, so it
 #   needs none here either.
@@ -212,14 +212,14 @@ jobs:
       - name: Check whether the security app credentials are available
         id: credentials
         env:
-          APP_ID: ${{ vars.GH_APP_SECURITY_APP_ID }}
+          CLIENT_ID: ${{ vars.GH_APP_SECURITY_CLIENT_ID }}
           PRIVATE_KEY: ${{ secrets.GH_APP_SECURITY_PRIVATE_KEY }}
         run: |
-          if [ -n "${APP_ID}" ] && [ -n "${PRIVATE_KEY}" ]; then
+          if [ -n "${CLIENT_ID}" ] && [ -n "${PRIVATE_KEY}" ]; then
             echo "available=true" >>"${GITHUB_OUTPUT}"
           else
             echo "available=false" >>"${GITHUB_OUTPUT}"
-            echo "GH_APP_SECURITY_APP_ID or GH_APP_SECURITY_PRIVATE_KEY is" \
+            echo "GH_APP_SECURITY_CLIENT_ID or GH_APP_SECURITY_PRIVATE_KEY is" \
               "unset, which is also the case for a pull request from a" \
               "fork: no check run is published, this job's status carries" \
               "the verdict." >>"${GITHUB_STEP_SUMMARY}"
@@ -233,7 +233,7 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc  # v3.4.0
         with:
-          app-id: ${{ vars.GH_APP_SECURITY_APP_ID }}
+          client-id: ${{ vars.GH_APP_SECURITY_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_SECURITY_PRIVATE_KEY }}
           permission-checks: write
 

@@ -219,10 +219,10 @@ assert eq "$mint.id" app-token "$p"
 assert eq "$mint.uses" "${renovate_mint%%  #*}" "$p"
 # Exactly the app, its key and one permission. No "owner" and no "repositories", so the
 # token is scoped to the calling repository only.
-assert eq "$mint.with | keys | sort | join(\",\")" app-id,permission-pull-requests,private-key "$p"
+assert eq "$mint.with | keys | sort | join(\",\")" client-id,permission-pull-requests,private-key "$p"
 assert eq "[$mint.with | keys[] | select(test(\"^permission-\"))] | join(\",\")" permission-pull-requests "$p"
 assert eq "$mint.with.\"permission-pull-requests\"" write "$p"
-assert eq "$mint.with.\"app-id\"" "\${{ vars.GH_APP_DEPENDENCIES_APP_ID }}" "$p"
+assert eq "$mint.with.\"client-id\"" "\${{ vars.GH_APP_DEPENDENCIES_CLIENT_ID }}" "$p"
 assert eq "$mint.with.\"private-key\"" "\${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}" "$p"
 # The private key is named once in the whole workflow: in the mint step.
 assert eq '[.. | select(tag == "!!str") | select(test("secrets\\."))] | length' 1 "$p"
