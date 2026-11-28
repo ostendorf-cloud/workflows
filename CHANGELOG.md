@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.10.1](https://github.com/ostendorf-cloud/workflows/compare/v0.10.0...v0.10.1) (2026-11-28)
+
+### Bug Fixes
+
+- **ci:** use the client id for the dependencies and security apps ([#110](https://github.com/ostendorf-cloud/workflows/pull/110))
+- **ci:** use the client id for the release app token ([#109](https://github.com/ostendorf-cloud/workflows/pull/109))
+
 ## [v0.10.0](https://github.com/ostendorf-cloud/workflows/compare/v0.9.0...v0.10.0) (2026-11-27)
 
 ### Features
