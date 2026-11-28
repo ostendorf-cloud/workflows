@@ -354,7 +354,7 @@ comments. This variant is optional. Without it the action keeps `github.token` a
 - Switching the identity on an open pull request leaves the old comment. The new identity posts
   a second one.
 - When `GH_APP_DEPENDENCIES_PRIVATE_KEY` is an organisation secret, its visibility must include
-  the repository. `GH_APP_DEPENDENCIES_APP_ID` is an organisation variable.
+  the repository. `GH_APP_DEPENDENCIES_CLIENT_ID` is an organisation variable.
 - A stronger design is not built here: a `workflow_run` comment workflow on the default branch,
   with the key in an environment limited to `main`.
 
@@ -411,7 +411,7 @@ jobs:
       - uses: actions/create-github-app-token@<digest>  # <version>
         id: app-token
         with:
-          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
+          client-id: ${{ vars.GH_APP_DEPENDENCIES_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
           permission-pull-requests: write
       - uses: ostendorf-cloud/workflows/.github/actions/pnpm-release-age-comment@v0
@@ -425,7 +425,7 @@ jobs:
   `reusable-renovate.yaml` uses for `actions/create-github-app-token`. The snippet carries no
   digest, so a Renovate update of the action never needs a README edit.
 - `actions/create-github-app-token` marks `app-id` as deprecated in favour of `client-id`.
-  The snippet keeps `app-id` and the existing variable, like `reusable-renovate.yaml`.
+  The snippet uses `client-id`, like `reusable-renovate.yaml`.
 
 ## Renovate preset
 

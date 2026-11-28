@@ -43,7 +43,7 @@ name: reusable-renovate
 #     reusable-dco's security app key, there is no sensible degraded mode
 #     without it, Renovate simply cannot run at all without a token.
 #
-#   vars.GH_APP_DEPENDENCIES_APP_ID, the dependencies app's app id, is an
+#   vars.GH_APP_DEPENDENCIES_CLIENT_ID, the dependencies app's client id, is an
 #   organisation-level variable, automatically available in a called
 #   reusable workflow with no declaration and no "secrets: inherit", so it
 #   needs no declaration here. Only the app's private key is a secret, and
@@ -456,7 +456,7 @@ jobs:
         if: steps.guard.outputs.run == 'true'
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc  # v3.4.0
         with:
-          app-id: ${{ vars.GH_APP_DEPENDENCIES_APP_ID }}
+          client-id: ${{ vars.GH_APP_DEPENDENCIES_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_DEPENDENCIES_PRIVATE_KEY }}
           # Deliberately no "owner" and no "repositories" input here.
           # Leaving both unset scopes the minted token to only the
